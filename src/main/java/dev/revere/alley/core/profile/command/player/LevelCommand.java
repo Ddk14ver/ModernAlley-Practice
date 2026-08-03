@@ -1,0 +1,29 @@
+package dev.revere.alley.core.profile.command.player;
+
+import dev.revere.alley.feature.level.menu.LevelMenu;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+
+/**
+ * 查看等级信息的命令
+ * Command to view level information.
+ *
+ * @author Emmy
+ * @project Alley
+ * @since 22/04/2025
+ */
+public class LevelCommand extends BaseCommand {
+    @CommandData(
+            name = "level",
+            aliases = {"levels"},
+            usage = "level",
+            description = "View info about your current level."
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+        new LevelMenu(this.getProfile(player.getUniqueId())).openMenu(player);
+    }
+}

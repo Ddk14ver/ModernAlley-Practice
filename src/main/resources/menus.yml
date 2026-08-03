@@ -1,0 +1,79 @@
+queues-menu:
+  type: MODERN # MODERN, DEFAULT
+
+layout-menu:
+  type: DEFAULT
+
+menus:
+  snapshot-menu:
+    title: "&6&l{name}'s Inventory"
+    buttons:
+      hits:
+        name: "&6&lHits: {hits}"
+        lore:
+          - " &fCritical: &6{critical_hits}"
+          - " &fBlocked: &6{blocked_hits}"
+          - " &fBest Combo: &6{longest_combo}"
+          - ""
+          - "&6&lPlayer"
+          - " &fW-Taps: &6{w_taps}"
+          - " &fAverage CPS: &6{average_combat_cps}"
+          - " &fHighest CPS: &6{highest_combat_cps}"
+        item: "DIAMOND_SWORD"
+        durability: 0
+      potions:
+        name: "&6&lHealth Potions"
+        lore:
+          - " &fRemaining: &6{potions_remaining}"
+          - " &fThrown: &6{potions_thrown}"
+          - " &fWasted: &6{potions_wasted}{heart}"
+          - " &fMissed: &6{potions_missed}"
+          - " &fAccuracy: &6{potion_accuracy}%"
+        item: "POTION"
+        durability: 16421
+      potion_effects:
+        name: "&6&lPotion Effects"
+        empty-lore:
+          - " &cNone."
+        lore-header: " &fActive Effects: &6{count}"
+        effect-line: " &7{effect}"
+        item: "GLASS_BOTTLE"
+        durability: 0
+      food:
+        name: "&6&lFood Level"
+        lore:
+          - " &fLevel: &6{food_level}"
+          - " &fSaturation: &6{saturation}"
+        item: "COOKED_BEEF"
+        durability: 0
+      health:
+        name: "&6&lHealth"
+        lore:
+          - " &fHealth: &6{health} {heart}"
+          - " &fAbsorption: &6{absorption}"
+        item: "GOLDEN_APPLE"
+        durability: 0
+      opponent:
+        slot: 53
+      armor:
+        slots: [ 36, 37, 38, 39 ]
+  spectator-teleport:
+    title: "&6&lSpectator Menu"
+    buttons:
+      match-info-button:
+        slot: 4
+        glass-durability: 15
+        name: "&6&lMatch Info"
+        lore:
+          - " &6│ &6Kit: &f{kit}"
+          - " &6│ &6Arena: &f{arena}"
+          - " &6│ &6Players: &f{players}"
+      spectator-teleport-button:
+        name: "{player-color}{username}"
+        lore:
+          - " &6│ &6Ping: &f{ping}ms"
+          - " &6│ &6Team: &f{team}"
+          - " &6│ &6ELO: &f{elo}"
+          - ""
+          - "&6&lLEFT-CLICK &fto teleport to this player."
+          - "&6&lRIGHT-CLICK &fto view their statistics."

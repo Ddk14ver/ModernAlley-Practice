@@ -1,0 +1,80 @@
+package dev.revere.alley.feature.ffa.command.impl.player;
+
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
+import dev.revere.alley.core.profile.enums.ProfileState;
+import dev.revere.alley.feature.ffa.FFAMatch;
+import dev.revere.alley.feature.ffa.FFAService;
+import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+
+/**
+ * @author Emmy
+ * @project Alley
+ * @since 04/06/2025
+ */
+public class FFASpectateCommand extends BaseCommand {
+    @CommandData(
+            name = "ffa.spectate",
+            usage = "spectate <ffaKit>",
+            aliases = {"specffa", "spectateffa"},
+            description = "Spectate a FFA match"
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+        String[] args = command.getArgs();
+
+        if (args.length < 1) {
+            command.sendUsage();
+            return;
+        }
+
+        ProfileService profileService = this.plugin.getService(ProfileService.class);
+        Profile profile = profileService.getProfile(player.getUniqueId());
+        if (profile.getState() != ProfileState.LOBBY) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ERROR_YOU_MUST_BE_IN_LOBBY));
+            return;
+        }
+
+        String ffaKitName = args[0];
+        FFAService ffaService = this.plugin.getService(FFAService.class);
+        Kit ffaKit = ffaService.getFfaKits().stream()
+                .filter(kit -> kit.getName().equalsIgnoreCase(ffaKitName))
+                .findFirst()
+                .orElse(null);
+
+        if (ffaKit == null) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.KIT_NOT_FOUND).replace("{kit-name}", ffaKitName));
+            return;
+        }
+
+        if (!ffaKit.isFfaEnabled()) {
+            //should never happen, but just in case
+            //不应该发生，但以防万一
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.FFA_DISABLED));
+            return;
+        }
+
+        FFAMatch match = ffaService.getMatches().stream()
+                .filter(m -> m.getKit().equals(ffaKit))
+                .findFirst()
+                .orElse(null);
+
+        if (match == null) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.FFA_NOT_FOUND).replace("{ffa-name}", ffaKitName));
+            return;
+        }
+
+        if (match.getSpectators().contains(player.getUniqueId())) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ERROR_YOU_ALREADY_SPECTATING_FFA));
+            return;
+        }
+
+        match.addSpectator(player);
+    }
+}

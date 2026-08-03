@@ -1,0 +1,42 @@
+# Default knockback profile
+disable_downward_kb: false
+horizontal:
+  ground: 0.651
+  air: 0.59
+  sprint_extra: 0.25
+vertical:
+  ground: 0.29
+  air: 0.27
+  sprint_extra: 0.05
+hit_delay: 10
+y_limit: 2.6
+stop_sprint: true
+projectile:
+  enabled: true
+  horizontal: 0.25
+  vertical: 0.20
+  horizontal_multiplier: 1.0
+  vertical_multiplier: 1.0
+  direction_override: false
+hitbox:
+  length: 0.6
+  height: 1.8
+potion:
+  enabled: false
+  horizontal_multiplier: 1.0
+  vertical_multiplier: 1.0
+  compensation_multiplier: 1.0
+  speed_compensation: 1.0
+  horizontal_compensation: 0.0
+  horizontal_offset: 0.0
+  vertical_offset: 0.0
+packet:
+  misplace:
+    enabled: false
+    distance: 0.1
+  delay:
+    enabled: false
+    ticks: 2
+modern:
+  cooldown_affects_kb: true
+  entity_interaction_range: 3.0

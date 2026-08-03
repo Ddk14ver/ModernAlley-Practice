@@ -1,0 +1,10 @@
+ENTITY_ATTACK:
+  - "{killer} executed `taskkill /IM {victim}.exe /F`."
+FALL:
+  - "{victim} encountered a fatal physics engine error, induced by {killer}."
+VOID:
+  - "{victim} was cast to void by {killer} and garbage collected."
+LAVA:
+  - "{killer} decided {victim}'s CPU needed some thermal stress testing."
+GENERIC:
+  - "Unhandled Exception: {victim} could not handle {killer}."

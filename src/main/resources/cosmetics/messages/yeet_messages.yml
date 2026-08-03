@@ -1,0 +1,10 @@
+ENTITY_ATTACK:
+  - "{killer} yeeted {victim} right into the death screen."
+FALL:
+  - "{killer} yeeted {victim} off a high place."
+VOID:
+  - "{killer} yeeted {victim} straight into the abyss."
+LAVA:
+  - "{killer} yeeted {victim} into the world's spiciest bathtub."
+GENERIC:
+  - "{victim} got fully yeeted by {killer}."

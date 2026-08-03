@@ -1,0 +1,21 @@
+cPearl: true
+TalibanPearl:
+  Slabs: true
+  Stairs: true
+  Stairs-block-if-incorrect-facing: true
+  cobblewall: true
+  bed: true
+  endportal: true
+  chest: true
+  piston-base: true
+  trapdoor: true
+  fencegate-in-half: true
+  block-down-equals-air: true
+  Block-if-block-in-front: true
+return-pearl: true
+tp-with-taliban-disabled: true
+
+Message: '&cInvalid Pearl'
+Invalid-Pearl-Message: false
+invalid-if-block-in-front: true
+Invalid-Pearl-Remove-Timer: true

@@ -1,0 +1,36 @@
+package dev.revere.alley.core.profile.command.player.setting.worldtime;
+
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+
+/**
+ * 设置个人世界时间为日落的命令
+ * Command to set personal world time to sunset.
+ *
+ * @author Emmy
+ * @project Alley
+ * @date 02/06/2024 - 11:05
+ */
+public class SunsetCommand extends BaseCommand {
+    @CommandData(
+            name = "sunset",
+            aliases = "sunrise",
+            cooldown = 1,
+            usage = "sunset",
+            description = "Set your personal world time to sunset."
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+        Profile profile = this.getProfile(player.getUniqueId());
+
+        profile.getProfileData().getSettingData().setTimeSunset(player);
+        player.sendMessage(this.getString(GlobalMessagesLocaleImpl.PROFILE_WORLD_TIME_SET)
+                .replace("{time}", profile.getProfileData().getSettingData().getTime().toLowerCase())
+        );
+    }
+}

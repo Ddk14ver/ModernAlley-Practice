@@ -1,0 +1,10 @@
+ENTITY_ATTACK:
+  - "{victim} was caught in the act of skidding by {killer}."
+FALL:
+  - "{killer} has performed the meteor countdown on {victim}."
+VOID:
+  - "{victim} has folded to fight {killer}."
+LAVA:
+  - "{victim} got a taste of {killer}'s lava cake."
+GENERIC:
+  - "{killer} has used CTRL + X to erase {victim} from existence."

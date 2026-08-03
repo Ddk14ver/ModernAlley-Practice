@@ -1,0 +1,246 @@
+package dev.revere.alley.feature.ffa;
+
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.common.text.CC;
+import dev.revere.alley.core.locale.LocaleService;
+import dev.revere.alley.core.locale.internal.impl.message.GameMessagesLocaleImpl;
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
+import dev.revere.alley.core.profile.data.types.ProfileFFAData;
+import dev.revere.alley.core.profile.enums.ProfileState;
+import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.coin.CoinRewardService;
+import dev.revere.alley.feature.combat.CombatService;
+import dev.revere.alley.feature.ffa.model.GameFFAPlayer;
+import dev.revere.alley.feature.hotbar.HotbarService;
+import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.spawn.SpawnService;
+import dev.revere.alley.feature.visibility.VisibilityService;
+import lombok.Getter;
+import lombok.Setter;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * @author Remi
+ * @project Alley
+ * @date 5/27/2024
+ */
+@Getter
+@Setter
+public abstract class FFAMatch {
+    protected final AlleyPlugin plugin = AlleyPlugin.getInstance();
+
+    private final String name;
+
+    private final Arena arena;
+    private final Kit kit;
+
+    private int maxPlayers;
+
+    private List<GameFFAPlayer> players;
+    private List<UUID> spectators;
+
+    /**
+     * Constructor for the AbstractFFAMatch class.
+     * AbstractFFAMatch 类的构造函数。
+     *
+     * @param name       The name of the match
+     *                  比赛名称
+     * @param arena      The arena the match is being played in
+     *                  比赛所在的竞技场
+     * @param kit        The kit the players are using
+     *                  玩家使用的装备包
+     * @param maxPlayers The maximum amount of players allowed in the match
+     *                  比赛允许的最大玩家数量
+     */
+    public FFAMatch(String name, Arena arena, Kit kit, int maxPlayers) {
+        this.name = name;
+        this.arena = arena;
+        this.kit = kit;
+        this.maxPlayers = maxPlayers;
+        this.players = new ArrayList<>();
+        this.spectators = new ArrayList<>();
+    }
+
+    public abstract void join(Player player);
+
+    public abstract void setupPlayer(Player player);
+
+    public abstract void handleDeath(Player player, Player killer);
+
+    public abstract void handleRespawn(Player player);
+
+    public abstract void leave(Player player);
+
+
+    /**
+     * Method to spectate the match as a player.
+     * 以玩家身份观战比赛的方法。
+     *
+     * @param player The player who wants to spectate the match.
+     *               想要观战比赛的玩家。
+     */
+    public void addSpectator(Player player) {
+        ProfileService profileService = this.plugin.getService(ProfileService.class);
+        VisibilityService visibilityService = this.plugin.getService(VisibilityService.class);
+        HotbarService hotbarService = this.plugin.getService(HotbarService.class);
+
+        Profile profile = profileService.getProfile(player.getUniqueId());
+
+        if (this.arena.getCenter() == null) {
+            player.sendMessage(CC.translate("&cThe arena is not set up for spectating"));
+            return;
+        }
+
+        profile.setState(ProfileState.SPECTATING);
+        profile.setFfaMatch(this);
+
+        visibilityService.updateVisibility(player);
+        hotbarService.applyHotbarItems(player);
+
+        player.teleport(this.arena.getCenter());
+        player.setCollidable(false);
+        player.setAllowFlight(true);
+        player.setFlying(true);
+
+        this.spectators.add(player.getUniqueId());
+    }
+
+    /**
+     * Method to remove a player from the spectator list and reset their state.
+     * 将玩家从观战列表中移除并重置其状态的方法。
+     *
+     * @param player The player to remove from the spectator list.
+     *               要从观战列表中移除的玩家。
+     */
+    public void removeSpectator(Player player) {
+        ProfileService profileService = this.plugin.getService(ProfileService.class);
+        VisibilityService visibilityService = this.plugin.getService(VisibilityService.class);
+        HotbarService hotbarService = this.plugin.getService(HotbarService.class);
+        SpawnService spawnService = this.plugin.getService(SpawnService.class);
+
+        Profile profile = profileService.getProfile(player.getUniqueId());
+        profile.setState(ProfileState.LOBBY);
+        profile.setFfaMatch(null);
+
+        visibilityService.updateVisibility(player);
+        hotbarService.applyHotbarItems(player);
+
+        player.setCollidable(true);
+        player.setAllowFlight(false);
+        player.setFlying(false);
+
+        spawnService.teleportToSpawn(player);
+
+        this.spectators.remove(player.getUniqueId());
+    }
+
+    /**
+     * Method to get an instance of GameFFAPlayer from a Player object.
+     * 从 Player 对象获取 GameFFAPlayer 实例的方法。
+     *
+     * @param player The Player object to get the GameFFAPlayer from.
+     *               要获取 GameFFAPlayer 的 Player 对象。
+     * @return The GameFFAPlayer instance associated with the Player, or null if not found.
+     *         与 Player 关联的 GameFFAPlayer 实例，如果未找到则为 null。
+     */
+    public GameFFAPlayer getGameFFAPlayer(Player player) {
+        return this.players.stream()
+                .filter(ffaPlayer -> ffaPlayer.getUuid().equals(player.getUniqueId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Handle the combat log of a player and killer, updating stats of the combat logger, ect...
+     * 处理玩家和击杀者的战斗记录，更新战斗记录者的统计数据等...
+     *
+     * @param player The player
+     *               玩家
+     * @param killer The killer
+     *               击杀者
+     */
+    public void handleCombatLog(Player player, Player killer) {
+        ProfileService profileService = this.plugin.getService(ProfileService.class);
+        CombatService combatService = this.plugin.getService(CombatService.class);
+
+        Profile profile = profileService.getProfile(player.getUniqueId());
+        ProfileFFAData ffaData = profile.getProfileData().getFfaData().get(this.getKit().getName());
+        ffaData.incrementDeaths();
+        ffaData.resetKillstreak();
+
+        Profile killerProfile = profileService.getProfile(killer.getUniqueId());
+        ProfileFFAData killerFfaData = killerProfile.getProfileData().getFfaData().get(this.getKit().getName());
+        killerFfaData.incrementKills();
+        killerFfaData.incrementKillstreak();
+
+        this.plugin.getService(CoinRewardService.class).rewardFFAKill(killer);
+
+        String combatLogMessage = this.plugin.getService(LocaleService.class).getString(GameMessagesLocaleImpl.FFA_COMBAT_LOG_DEATH_MESSAGE)
+                .replace("{player}", player.getName())
+                .replace("{killer}", killer.getName())
+                .replace("{name-color}", String.valueOf(profile.getNameColor()))
+                .replace("{killer-name-color}", String.valueOf(killerProfile.getNameColor()));
+        this.getPlayers().forEach(ffaPlayer -> ffaPlayer.getPlayer().sendMessage(CC.translate(combatLogMessage)));
+        this.sendKillstreakAlertMessage(killer);
+
+        combatService.resetCombatLog(player);
+    }
+
+    /**
+     * Teleports a player to the safe zone of the FFA arena.
+     * 将玩家传送到 FFA 竞技场的安全区域。
+     *
+     * @param player The player to teleport.
+     *               要传送的玩家。
+     */
+    public void teleportToSafeZone(Player player) {
+        CombatService combatService = this.plugin.getService(CombatService.class);
+        LocaleService localeService = this.plugin.getService(LocaleService.class);
+        if (combatService.isPlayerInCombat(player.getUniqueId())) {
+            player.sendMessage(CC.translate(localeService.getString(GlobalMessagesLocaleImpl.ERROR_YOU_ARE_IN_COMBAT)));
+            return;
+        }
+
+        Location ffaSpawn = this.arena.getPos1();
+        player.teleport(ffaSpawn);
+        player.sendMessage(CC.translate(localeService.getString(GameMessagesLocaleImpl.FFA_TELEPORTED_TO_SAFE_ZONE)));
+    }
+
+    /**
+     * Alerts all players in the match if a player reaches a killstreak of 5 or more.
+     * 当玩家达到 5 或更高的连杀数时，向比赛中的所有玩家发出警报。
+     *
+     * @param player The player who reached the killstreak.
+     *               达到连杀数的玩家。
+     */
+    public void sendKillstreakAlertMessage(Player player) {
+        LocaleService localeService = this.plugin.getService(LocaleService.class);
+        if (!localeService.getBoolean(GameMessagesLocaleImpl.FFA_KILLSTREAK_ALERT_ENABLED_BOOLEAN)) {
+            return;
+        }
+
+        ProfileService profileService = this.plugin.getService(ProfileService.class);
+        Profile profile = profileService.getProfile(player.getUniqueId());
+        ProfileFFAData ffaData = profile.getProfileData().getFfaData().get(this.getKit().getName());
+
+        int interval = localeService.getInt(GameMessagesLocaleImpl.FFA_KILLSTREAK_ALERT_INTERVAL);
+        List<String> messages = localeService.getStringList(GameMessagesLocaleImpl.FFA_KILLSTREAK_ALERT_MESSAGE);
+        if (ffaData.getKillstreak() % interval == 0) {
+            this.getPlayers().forEach(ffaPlayer -> {
+                for (String message : messages) {
+                    ffaPlayer.getPlayer().sendMessage(CC.translate(message
+                            .replace("{player}", player.getName())
+                            .replace("{name-color}", String.valueOf(profile.getNameColor()))
+                            .replace("{killstreak}", String.valueOf(ffaData.getKillstreak()))));
+                }
+            });
+        }
+    }
+}

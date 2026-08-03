@@ -1,0 +1,272 @@
+name: Auto-Build and Release
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for skip release keyword
+        id: skip_check
+        run: |
+          commit_msg="${{ github.event.head_commit.message }}"
+          echo "Commit message: $commit_msg"
+          
+          if echo "$commit_msg" | grep -q "SKIP-RELEASE\|NO-RELEASE\|\[skip release\]\|\[no release\]"; then
+            echo "🚫 Release skipped due to keyword in commit message"
+            echo "💡 To create a release, commit without: SKIP-RELEASE, NO-RELEASE, [skip release], or [no release]"
+            echo "skip_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No skip keyword found, proceeding with release"
+            echo "skip_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up JDK 8
+        if: steps.skip_check.outputs.skip_release == 'false'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Configure Git
+        if: steps.skip_check.outputs.skip_release == 'false'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Analyze merge commits for version bump type
+        if: steps.skip_check.outputs.skip_release == 'false'
+        id: bump_type
+        run: |
+          echo "Analyzing merge commits for version bump keywords..."
+          
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$last_tag" ]; then
+            merge_commits=$(git log --oneline -10 --merges --pretty=format:"%s")
+          else
+            merge_commits=$(git log ${last_tag}..HEAD --oneline --merges --pretty=format:"%s")
+          fi
+          
+          echo "Recent merge commits:"
+          echo "$merge_commits"
+          
+          bump_type="patch"
+          highest_priority="patch"
+          
+          while IFS= read -r commit; do
+            if echo "$commit" | grep -q "MAJOR"; then
+              bump_type="major"
+              highest_priority="major"
+              echo "🚀 MAJOR version bump detected in: $commit"
+              break
+            elif echo "$commit" | grep -q "MINOR" && [ "$highest_priority" != "major" ]; then
+              bump_type="minor"
+              highest_priority="minor"
+              echo "📈 MINOR version bump detected in: $commit"
+            elif echo "$commit" | grep -q "PATCH" && [ "$highest_priority" = "patch" ]; then
+              echo "🔧 PATCH version bump detected in: $commit"
+            fi
+          done <<< "$merge_commits"
+          
+          if [ "$bump_type" = "patch" ] && [ -z "$merge_commits" ]; then
+            echo "🔧 Default PATCH version bump (no merge commits found - likely direct push)"
+          elif [ "$bump_type" = "patch" ] && [ -n "$merge_commits" ]; then
+            echo "🔧 Default PATCH version bump (no keywords found in merge commits)"
+          fi
+          
+          echo "Final bump type: $bump_type"
+          echo "bump_type=$bump_type" >> $GITHUB_OUTPUT
+
+      - name: Get current version and calculate new version
+        if: steps.skip_check.outputs.skip_release == 'false'
+        id: version
+        run: |
+          current_version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "Current version: $current_version"
+          
+          bump_type="${{ steps.bump_type.outputs.bump_type }}"
+          echo "Bump type: $bump_type"
+          
+          if [[ $current_version =~ ^([0-9]+)\.([0-9]+)\.?([0-9]*) ]]; then
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            patch=${BASH_REMATCH[3]}
+          
+            if [ -z "$patch" ]; then
+              patch=0
+            fi
+          
+            echo "Parsed version - Major: $major, Minor: $minor, Patch: $patch"
+          
+            case $bump_type in
+              "major")
+                new_major=$((major + 1))
+                new_minor=0
+                new_patch=0
+                new_version="${new_major}.${new_minor}.${new_patch}"
+                ;;
+              "minor")
+                new_major=$major
+                new_minor=$((minor + 1))
+                new_patch=0
+                new_version="${new_major}.${new_minor}.${new_patch}"
+                ;;
+              "patch"|*)
+                new_major=$major
+                new_minor=$minor
+                new_patch=$((patch + 1))
+                new_version="${new_major}.${new_minor}.${new_patch}"
+                ;;
+            esac
+          else
+            echo "❌ Unable to parse version format: $current_version"
+            new_version="${current_version}.0.1"
+          fi
+          
+          echo "New version: $new_version"
+          echo "version=$new_version" >> $GITHUB_OUTPUT
+          echo "current_version=$current_version" >> $GITHUB_OUTPUT
+          echo "bump_type=$bump_type" >> $GITHUB_OUTPUT
+
+      - name: Update version in pom.xml
+        if: steps.skip_check.outputs.skip_release == 'false'
+        run: |
+          mvn versions:set -DnewVersion=${{ steps.version.outputs.version }} -DgenerateBackupPoms=false
+
+      - name: Generate Changelog
+        if: steps.skip_check.outputs.skip_release == 'false'
+        id: changelog
+        run: |
+          echo "Generating changelog..."
+          
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          bump_type="${{ steps.version.outputs.bump_type }}"
+          
+          if [ -z "$last_tag" ]; then
+            commits=$(git log --oneline --pretty=format:"- %s (%h)" --no-merges | head -50)
+          else
+            commits=$(git log ${last_tag}..HEAD --oneline --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          changelog="## 🎉 Alley v${{ steps.version.outputs.version }}\n\n"
+          
+          case $bump_type in
+            "major")
+              changelog="${changelog}### 🚀 **MAJOR RELEASE** - Breaking Changes Included\n\n"
+              ;;
+            "minor")
+              changelog="${changelog}### 📈 **MINOR RELEASE** - New Features Added\n\n"
+              ;;
+            "patch")
+              changelog="${changelog}### 🔧 **PATCH RELEASE** - Bug Fixes & Improvements\n\n"
+              ;;
+          esac
+          
+          changelog="${changelog}**Previous Version:** \`${{ steps.version.outputs.current_version }}\`\n"
+          changelog="${changelog}**New Version:** \`${{ steps.version.outputs.version }}\`\n\n"
+          changelog="${changelog}### 📝 Changes:\n\n"
+          
+          while IFS= read -r line; do
+            if [[ $line =~ Merge\ pull\ request\ #([0-9]+) ]]; then
+              pr_number=${BASH_REMATCH[1]}
+              changelog="${changelog}${line} ([#${pr_number}](https://github.com/${{ github.repository }}/pull/${pr_number}))\n"
+            else
+              line=$(echo "$line" | sed 's/MAJOR/🚀 **MAJOR**/g' | sed 's/MINOR/📈 **MINOR**/g' | sed 's/PATCH/🔧 **PATCH**/g')
+              changelog="${changelog}${line}\n"
+            fi
+          done <<< "$commits"
+          
+          changelog="${changelog}\n---\n"
+          changelog="${changelog}**Download:** [Alley-${{ steps.version.outputs.version }}.jar](https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/Alley-${{ steps.version.outputs.version }}.jar)\n\n"
+          changelog="${changelog}**Installation:** Place the JAR file in your \`plugins/\` folder and restart your server.\n\n"
+          
+          changelog="${changelog}---\n### 🏷️ Version Bump Keywords\n"
+          changelog="${changelog}"$'\n'"- Add \`MAJOR\` to commit messages for breaking changes (X.0.0)\n"
+          changelog="${changelog}"$'\n'"- Add \`MINOR\` to commit messages for new features (X.Y.0)\n"
+          changelog="${changelog}"$'\n'"- Add \`PATCH\` to commit messages for bug fixes (X.Y.Z)\n"
+          changelog="${changelog}"$'\n'"- No keyword = automatic patch bump\n"
+          changelog="${changelog}"$'\n'"- Add \`SKIP-RELEASE\` or \`[skip release]\` to skip creating a release\n"
+          
+          echo -e "$changelog" > CHANGELOG.md
+          
+          release_notes="$changelog"
+          
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$release_notes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build with Maven
+        if: steps.skip_check.outputs.skip_release == 'false'
+        run: mvn clean package
+
+      - name: Commit version update
+        if: steps.skip_check.outputs.skip_release == 'false'
+        run: |
+          git add pom.xml CHANGELOG.md
+          commit_msg="🚀 Auto-update version to ${{ steps.version.outputs.version }}"
+          
+          case "${{ steps.version.outputs.bump_type }}" in
+            "major")
+              commit_msg="${commit_msg} (MAJOR RELEASE)"
+              ;;
+            "minor")
+              commit_msg="${commit_msg} (MINOR RELEASE)"
+              ;;
+            "patch")
+              commit_msg="${commit_msg} (PATCH RELEASE)"
+              ;;
+          esac
+          
+          git commit -m "$commit_msg" || exit 0
+          git push
+
+      - name: Create Release Tag
+        if: steps.skip_check.outputs.skip_release == 'false'
+        run: |
+          tag_msg="Release v${{ steps.version.outputs.version }} (${{ steps.version.outputs.bump_type }} bump)"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "$tag_msg"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        if: steps.skip_check.outputs.skip_release == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          name: "🎉 Alley v${{ steps.version.outputs.version }} (${{ steps.version.outputs.bump_type }} release)"
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: |
+            target/Alley-${{ steps.version.outputs.version }}.jar
+          draft: false
+          prerelease: ${{ steps.version.outputs.bump_type == 'major' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Build Artifact (Backup)
+        if: steps.skip_check.outputs.skip_release == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Alley-${{ steps.version.outputs.version }}-${{ steps.version.outputs.bump_type }}
+          path: target/Alley-${{ steps.version.outputs.version }}.jar
+          if-no-files-found: error
+
+      - name: Post-release summary
+        if: steps.skip_check.outputs.skip_release == 'false'
+        run: |
+          echo "🎉 Successfully released Alley v${{ steps.version.outputs.version }}!"
+          echo "📦 Version bump type: ${{ steps.version.outputs.bump_type }}"
+          echo "📈 Previous version: ${{ steps.version.outputs.current_version }}"
+          echo "🚀 New version: ${{ steps.version.outputs.version }}"
+          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}"

@@ -1,0 +1,271 @@
+package dev.revere.alley.feature.match.snapshot.menu;
+
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.library.menu.Button;
+import dev.revere.alley.library.menu.Menu;
+import dev.revere.alley.core.config.ConfigService;
+import dev.revere.alley.feature.match.snapshot.Snapshot;
+import dev.revere.alley.feature.match.snapshot.menu.button.SnapshotDataButton;
+import dev.revere.alley.feature.match.snapshot.menu.button.SnapshotOpponentButton;
+import dev.revere.alley.feature.match.snapshot.menu.button.items.SnapshotArmorButton;
+import dev.revere.alley.feature.match.snapshot.menu.button.items.SnapshotInventoryButton;
+import dev.revere.alley.common.text.Symbol;
+import lombok.AllArgsConstructor;
+import org.bukkit.Material;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * @author Emmy
+ * @project Alley
+ * @since 27/06/2025
+ * 快照菜单 - 显示玩家赛后物品栏快照的菜单。
+ */
+@AllArgsConstructor
+public class SnapshotMenu extends Menu {
+    private final Snapshot snapshot;
+
+    @Override
+    public String getTitle(Player player) {
+        String title = AlleyPlugin.getInstance().getService(ConfigService.class).getMenusConfig().getString("menus.snapshot-menu.title", "&6&l{name}'s Inventory");
+        return title.replace("{name}", this.snapshot.getUsername());
+    }
+
+    @Override
+    public Map<Integer, Button> getButtons(Player player) {
+        Map<Integer, Button> buttons = new HashMap<>();
+
+        buttons.put(53, new SnapshotOpponentButton(this.snapshot));
+
+        FileConfiguration config = AlleyPlugin.getInstance().getService(ConfigService.class).getMenusConfig();
+        String path = "menus.snapshot-menu.buttons";
+
+        this.getInventoryContents(buttons);
+        this.getArmorContents(config, path, buttons);
+        this.getHitsDataButton(buttons, config, path);
+        this.getPotionsDataButton(buttons, config, path);
+        this.getPotionEffectsDataButton(config, path, buttons);
+        this.getFoodLevelDataButton(buttons, config, path);
+        this.getHealthDataButton(buttons, config, path);
+
+        return buttons;
+    }
+
+    @Override
+    public int getSize() {
+        return 9 * 6;
+    }
+
+    /**
+     * Gets the inventory contents for the snapshot menu.
+     * 获取快照菜单的物品栏内容。
+     *
+     * @param buttons The map of buttons to add the inventory contents to.
+     *        用于添加物品栏内容的按钮映射。
+     */
+    private void getInventoryContents(Map<Integer, Button> buttons) {
+        ItemStack[] inventory = this.snapshot.getInventory();
+        for (int i = 0; i < inventory.length; i++) {
+            buttons.put(i, new SnapshotInventoryButton(inventory[i]));
+        }
+    }
+
+    /**
+     * Gets the armor contents for the snapshot menu.
+     * 获取快照菜单的盔甲内容。
+     *
+     * @param config  The configuration file containing the button settings.
+     *        包含按钮设置的配置文件。
+     * @param path    The path in the configuration file where the button settings are located.
+     *        按钮设置在配置文件中的路径。
+     * @param buttons The map of buttons to add the armor contents to.
+     *        用于添加盔甲内容的按钮映射。
+     */
+    private void getArmorContents(FileConfiguration config, String path, Map<Integer, Button> buttons) {
+        List<Integer> armorSlots = config.getIntegerList(path + ".armor.slots");
+        for (int i = 0; i < armorSlots.size(); i++) {
+            buttons.put(armorSlots.get(i), new SnapshotArmorButton(this.snapshot, i));
+        }
+    }
+
+    /**
+     * Gets the hits data button for the snapshot menu.
+     * 获取快照菜单的命中数据按钮。
+     *
+     * @param buttons The map of buttons to add the hits data button to.
+     *        用于添加命中数据按钮的按钮映射。
+     * @param config  The configuration file containing the button settings.
+     *        包含按钮设置的配置文件。
+     * @param path    The path in the configuration file where the button settings are located.
+     *        按钮设置在配置文件中的路径。
+     */
+    private void getHitsDataButton(Map<Integer, Button> buttons, FileConfiguration config, String path) {
+        buttons.put(51, new SnapshotDataButton(
+                config.getString(path + ".hits.name").replace("{hits}", String.valueOf(this.snapshot.getTotalHits())),
+
+                getHitsLore(config, path).stream().map(line -> line
+                        .replaceAll("\\{critical_hits}", String.valueOf(this.snapshot.getCriticalHits()))
+                        .replaceAll("\\{blocked_hits}", String.valueOf(this.snapshot.getBlockedHits()))
+                        .replaceAll("\\{longest_combo}", String.valueOf(this.snapshot.getLongestCombo()))
+                        .replaceAll("\\{w_taps}", String.valueOf(this.snapshot.getWTaps()))
+                        .replaceAll("\\{average_combat_cps}", String.format(Locale.US, "%.2f", this.snapshot.getAverageCombatCps()))
+                        .replaceAll("\\{highest_combat_cps}", String.valueOf(this.snapshot.getHighestCombatCps()))
+                ).collect(Collectors.toList()),
+
+                Material.getMaterial(config.getString(path + ".hits.item", "DIAMOND_SWORD")),
+                config.getInt(path + ".hits.durability", 0),
+                1
+        ));
+    }
+
+    private List<String> getHitsLore(FileConfiguration config, String path) {
+        List<String> lore = new ArrayList<>(config.getStringList(path + ".hits.lore"));
+        String averageCombatCpsLine = lore.stream()
+                .filter(line -> line.contains("{average_combat_cps}"))
+                .findFirst()
+                .orElse(" &fAverage CPS: &6{average_combat_cps}");
+        String highestCombatCpsLine = lore.stream()
+                .filter(line -> line.contains("{highest_combat_cps}"))
+                .findFirst()
+                .orElse(" &fHighest CPS: &6{highest_combat_cps}");
+        lore.removeIf(line -> line.contains("%alley_player-max-cps%"));
+        lore.removeIf(line -> line.contains("{average_combat_cps}")
+                || line.contains("{highest_combat_cps}"));
+        boolean hasCriticalHits = lore.stream().anyMatch(line -> line.contains("{critical_hits}"));
+        boolean hasBlockedHits = lore.stream().anyMatch(line -> line.contains("{blocked_hits}"));
+
+        int insertIndex = 0;
+        if (!hasCriticalHits) {
+            lore.add(insertIndex++, " &fCritical: &6{critical_hits}");
+        }
+        if (!hasBlockedHits) {
+            lore.add(insertIndex, " &fBlocked: &6{blocked_hits}");
+        }
+        lore.add(averageCombatCpsLine);
+        lore.add(highestCombatCpsLine);
+        return lore;
+    }
+
+    /**
+     * Gets the potions data button for the snapshot menu.
+     * 获取快照菜单的药水数据按钮。
+     *
+     * @param buttons The map of buttons to add the potions data button to.
+     *        用于添加药水数据按钮的按钮映射。
+     * @param config  The configuration file containing the button settings.
+     *        包含按钮设置的配置文件。
+     * @param path    The path in the configuration file where the button settings are located.
+     *        按钮设置在配置文件中的路径。
+     */
+    private void getPotionsDataButton(Map<Integer, Button> buttons, FileConfiguration config, String path) {
+        buttons.put(50, new SnapshotDataButton(
+                config.getString(path + ".potions.name"),
+
+                config.getStringList(path + ".potions.lore").stream().map(line -> line
+                        .replaceAll("\\{potions_remaining}", String.valueOf(this.snapshot.getAmountOfPotionsInInventory()))
+                        .replaceAll("\\{potions_thrown}", String.valueOf(this.snapshot.getThrownPotions()))
+                        .replaceAll("\\{potions_wasted}", String.valueOf(Math.max(0, this.snapshot.getThrownPotions() - this.snapshot.getMissedPotions())))
+                        .replaceAll("\\{potions_missed}", String.valueOf(this.snapshot.getMissedPotions()))
+                        .replaceAll("\\{potion_accuracy}", String.valueOf(this.snapshot.getPotionAccuracy()))
+                        .replaceAll("\\{heart}", Symbol.HEART)
+                ).collect(Collectors.toList()),
+
+                Material.getMaterial(config.getString(path + ".potions.item", "POTION")),
+                config.getInt(path + ".potions.durability", 0),
+                Math.max(1, this.snapshot.getAmountOfPotionsInInventory())
+        ));
+    }
+
+    /**
+     * Gets the potions data button for the snapshot menu.
+     * 获取快照菜单的药水效果数据按钮。
+     *
+     * @param config  The configuration file containing the button settings.
+     *        包含按钮设置的配置文件。
+     * @param path    The path in the configuration file where the button settings are located.
+     *        按钮设置在配置文件中的路径。
+     * @param buttons The map of buttons to add the potions data button to.
+     *        用于添加药水效果数据按钮的按钮映射。
+     */
+    private void getPotionEffectsDataButton(FileConfiguration config, String path, Map<Integer, Button> buttons) {
+        List<String> effectsLore = new ArrayList<>();
+        if (this.snapshot.getPotionEffects().isEmpty()) {
+            effectsLore.addAll(config.getStringList(path + ".potion_effects.empty-lore"));
+        } else {
+            effectsLore.add(config.getString(path + ".potion_effects.lore-header").replace("{count}", String.valueOf(this.snapshot.getPotionEffects().size())));
+            effectsLore.add("");
+            for (String effect : this.snapshot.getPotionEffects()) {
+                effectsLore.add(config.getString(path + ".potion_effects.effect-line").replace("{effect}", effect));
+            }
+        }
+
+        buttons.put(49, new SnapshotDataButton(
+                config.getString(path + ".potion_effects.name"),
+                effectsLore,
+                Material.getMaterial(config.getString(path + ".potion_effects.item", "BREWING_STAND")),
+                config.getInt(path + ".potion_effects.durability", 0),
+                1
+        ));
+    }
+
+    /**
+     * Gets the food level data button for the snapshot menu.
+     * 获取快照菜单的饱食度数据按钮。
+     *
+     * @param buttons The map of buttons to add the food level button to.
+     *        用于添加饱食度按钮的按钮映射。
+     * @param config  The configuration file containing the button settings.
+     *        包含按钮设置的配置文件。
+     * @param path    The path in the configuration file where the button settings are located.
+     *        按钮设置在配置文件中的路径。
+     */
+    private void getFoodLevelDataButton(Map<Integer, Button> buttons, FileConfiguration config, String path) {
+        buttons.put(48, new SnapshotDataButton(
+                config.getString(path + ".food.name"),
+
+                config.getStringList(path + ".food.lore").stream().map(line -> line
+                        .replaceAll("\\{food_level}", String.valueOf(this.snapshot.getFoodLevel()))
+                        .replaceAll("\\{saturation}", String.valueOf(Math.round(this.snapshot.getSaturation())))
+                ).collect(Collectors.toList()),
+
+                Material.getMaterial(config.getString(path + ".food.item", "COOKED_BEEF")),
+                config.getInt(path + ".food.durability", 0),
+                1
+        ));
+    }
+
+    /**
+     * Gets the health data button for the snapshot menu.
+     * 获取快照菜单的生命值数据按钮。
+     *
+     * @param buttons The map of buttons to add the health button to.
+     *        用于添加生命值按钮的按钮映射。
+     * @param config  The configuration file containing the button settings.
+     *        包含按钮设置的配置文件。
+     * @param path    The path in the configuration file where the button settings are located.
+     *        按钮设置在配置文件中的路径。
+     */
+    private void getHealthDataButton(Map<Integer, Button> buttons, FileConfiguration config, String path) {
+        buttons.put(47, new SnapshotDataButton(
+                config.getString(path + ".health.name"),
+
+                config.getStringList(path + ".health.lore").stream().map(line -> line
+                        .replaceAll("\\{health}", String.valueOf(this.snapshot.getHealth()))
+                        .replaceAll("\\{absorption}", String.valueOf(Math.round(this.snapshot.getAbsorption())))
+                        .replaceAll("\\{heart}", Symbol.HEART)
+                ).collect(Collectors.toList()),
+
+                Material.getMaterial(config.getString(path + ".health.item", "GOLDEN_APPLE")),
+                config.getInt(path + ".health.durability", 0),
+                1
+        ));
+    }
+}

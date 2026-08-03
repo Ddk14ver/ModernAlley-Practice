@@ -1,0 +1,30 @@
+package dev.revere.alley.core.profile.command.player.setting;
+
+import dev.revere.alley.core.profile.menu.setting.PracticeSettingsMenu;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+
+/**
+ * 打开练习设置菜单的命令
+ * Command to open the practice settings menu.
+ *
+ * @author Emmy
+ * @project Alley
+ * @date 19/05/2024 - 11:27
+ */
+
+public class PracticeSettingsCommand extends BaseCommand {
+    @CommandData(
+            name = "practicesettings",
+            usage = "practicesettings",
+            description = "Open the practice settings menu."
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+
+        new PracticeSettingsMenu().openMenu(player);
+    }
+}

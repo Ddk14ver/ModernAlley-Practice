@@ -1,0 +1,34 @@
+package dev.revere.alley.feature.arena.command.impl.storage;
+
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.arena.ArenaService;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+
+/**
+ * @author Remi
+ * @project Alley
+ * @date 5/20/2024
+ */
+public class ArenaSaveAllCommand extends BaseCommand {
+    @CommandData(
+            name = "arena.saveall",
+            isAdminOnly = true,
+            usage = "arena saveall",
+            description = "Saves all arenas to storage"
+            // 将所有竞技场保存到存储中
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+
+        for (Arena arena : this.plugin.getService(ArenaService.class).getArenas()) {
+            this.plugin.getService(ArenaService.class).saveArena(arena);
+        }
+
+        player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ARENA_SAVED_ALL));
+    }
+}

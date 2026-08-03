@@ -1,0 +1,10 @@
+name: Alley
+version: '${project.version}'
+main: dev.revere.alley.AlleyPlugin
+api-version: '1.21'
+authors: [ "Remi", "Hamza", "Emmy","Ddk1AI" ]
+description: '${project.description}'
+website: https://discord.gg/revere
+softdepend:
+  - PlaceholderAPI
+depend: [ FastAsyncWorldEdit, ProtocolLib, Citizens ]

@@ -1,0 +1,101 @@
+package dev.revere.alley.feature.title.menu;
+
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.common.item.ItemBuilder;
+import dev.revere.alley.common.text.CC;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.progress.PlayerProgress;
+import dev.revere.alley.core.profile.progress.ProgressService;
+import dev.revere.alley.feature.title.model.TitleRecord;
+import dev.revere.alley.library.menu.Button;
+import lombok.AllArgsConstructor;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.ClickType;
+import org.bukkit.inventory.ItemStack;
+
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * @author Emmy
+ * @project Alley
+ * @since 22/04/2025
+ */
+@AllArgsConstructor
+public class TitleButton extends Button {
+    private final Profile profile;
+    private final TitleRecord title;
+
+    @Override
+    public ItemStack getButtonItem(Player player) {
+
+        if (!this.profile.getProfileData().getUnlockedTitles().contains(this.title.getName())) {
+            return new ItemBuilder(Material.RED_STAINED_GLASS_PANE)
+                    .name("&6&l" + this.title.getName())
+                    .lore(
+                            this.progress()
+                    )
+                    .hideMeta()
+                    .build();
+        }
+
+        Material icon = this.title.getKit() != null ? this.title.getKit().getIcon() : Material.NAME_TAG;
+        return new ItemBuilder(icon)
+                .name("&6&l" + this.title.getName())
+                .lore(
+                        CC.MENU_BAR,
+                        " &a&lUNLOCKED",
+                        "",
+                        "&aClick to select!",
+                        CC.MENU_BAR
+                )
+                .durability(this.title.getKit() != null ? this.title.getKit().getDurability() : 0)
+                .hideMeta()
+                .build();
+    }
+
+    @Override
+    public void clicked(Player player, ClickType clickType) {
+        if (clickType != ClickType.LEFT) return;
+
+        if (!this.profile.getProfileData().getUnlockedTitles().contains(this.title.getName())) {
+            player.sendMessage(CC.translate("&cTo select this title, you need to unlock it first."));
+            return;
+        }
+
+        if (this.profile.getProfileData().getSelectedTitle().equals(this.title.getName())) {
+            player.sendMessage(CC.translate("&cYou already have this title selected."));
+            return;
+        }
+
+        this.profile.getProfileData().setSelectedTitle(this.title.getName());
+        player.sendMessage(CC.translate("&aYou have selected the &6" + this.title.getName() + " &atitle."));
+    }
+
+    /**
+     * Get the progress of the title.
+     * 获取该头衔的解锁进度。
+     *
+     * @return A list of strings representing the progress.
+     *         表示进度的字符串列表。
+     */
+    private List<String> progress() {
+        PlayerProgress progress = AlleyPlugin.getInstance().getService(ProgressService.class).calculateProgress(this.profile, this.title.getName());
+
+        return Arrays.asList(
+                CC.MENU_BAR,
+                " &c&lLOCKED",
+                "",
+                String.format(" &fUnlock &6%s &fwith %d more %s.",
+                        progress.getNextRankName(),
+                        progress.getWinsRequired(),
+                        progress.getWinOrWins()
+                ),
+                "&f " + progress.getProgressBar(12, "■") + " &7" + progress.getProgressPercentage(),
+                "",
+                "&fRequires &c&l" + this.title.getRequiredDivision().getName().toUpperCase() + " &fdivision.",
+                CC.MENU_BAR
+        );
+    }
+}

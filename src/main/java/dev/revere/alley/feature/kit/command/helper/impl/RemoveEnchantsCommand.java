@@ -1,0 +1,46 @@
+package dev.revere.alley.feature.kit.command.helper.impl;
+
+import dev.revere.alley.common.text.CC;
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
+
+/**
+ * @author Emmy
+ * @project Alley
+ * @date 28/10/2024 - 09:15
+ */
+public class RemoveEnchantsCommand extends BaseCommand {
+    @CommandData(
+            name = "removeenchants",
+            aliases = "enchantsremovement",
+            isAdminOnly = true,
+            usage = "removeenchants",
+            description = "Removes all enchantments from the item you're holding."
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+
+        if (player.getInventory().getItemInMainHand().getType() == Material.AIR) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ERROR_YOU_MUST_HOLD_ITEM));
+            return;
+        }
+
+        if (player.getInventory().getItemInMainHand().getEnchantments().isEmpty()) {
+            player.sendMessage(CC.translate("&cThe item you're holding doesn't have any enchantments."));
+            return;
+        }
+
+        player.sendMessage(CC.translate("&cEnchantsments: &f" + player.getInventory().getItemInMainHand().getEnchantments().keySet()));
+
+        player.getInventory().getItemInMainHand().getEnchantments().keySet().forEach(enchant -> {
+            player.getInventory().getItemInMainHand().removeEnchantment(enchant);
+        });
+
+        player.sendMessage(CC.translate("&aSuccessfully removed all enchantments from the &6" + player.getInventory().getItemInMainHand().getType().name() + " &aitem."));
+    }
+}

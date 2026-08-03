@@ -1,0 +1,114 @@
+package dev.revere.alley.feature.arena.command.impl.manage;
+
+import dev.revere.alley.common.text.EnumFormatter;
+import dev.revere.alley.core.locale.LocaleService;
+import dev.revere.alley.core.locale.internal.impl.SettingsLocaleImpl;
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.arena.ArenaService;
+import dev.revere.alley.feature.arena.ArenaType;
+import dev.revere.alley.feature.arena.internal.types.FreeForAllArena;
+import dev.revere.alley.feature.arena.internal.types.SharedArena;
+import dev.revere.alley.feature.arena.internal.types.StandAloneArena;
+import dev.revere.alley.feature.arena.selection.ArenaSelection;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+
+import java.util.Arrays;
+import java.util.Objects;
+
+/**
+ * @author Remi
+ * @project Alley
+ * @date 5/20/2024
+ */
+public class ArenaCreateCommand extends BaseCommand {
+    @CommandData(
+            name = "arena.create",
+            isAdminOnly = true,
+            usage = "arena create <arenaName> <type>",
+            description = "Creates a new arena of the specified type"
+            // 创建一个指定类型的新竞技场
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+        String[] args = command.getArgs();
+
+        if (args.length < 2) {
+            command.sendUsage();
+            return;
+        }
+
+        String arenaName = args[0];
+        ArenaType arenaType = Arrays.stream(ArenaType.values())
+                .filter(type -> type.name().equalsIgnoreCase(args[1]))
+                .findFirst()
+                .orElse(null);
+
+        if (arenaType == null) {
+            player.sendMessage(EnumFormatter.outputAvailableValues(ArenaType.class));
+            return;
+        }
+
+        if (this.plugin.getService(ArenaService.class).getArenaByName(arenaName) != null) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ARENA_ALREADY_EXISTS));
+            return;
+        }
+
+        ArenaSelection arenaSelection = ArenaSelection.createSelection(player);
+        if (!arenaSelection.hasSelection()) {
+            player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ARENA_NO_SELECTION));
+            return;
+        }
+
+        Arena arena;
+        switch (arenaType) {
+            case SHARED:
+                arena = new SharedArena(arenaName, arenaSelection.getMinimum(), arenaSelection.getMaximum());
+                break;
+            case STANDALONE:
+                arena = new StandAloneArena(arenaName, arenaSelection.getMinimum(), arenaSelection.getMaximum(), null, null, 7, 70);
+                break;
+            case FFA:
+                arena = new FreeForAllArena(arenaName, arenaSelection.getMinimum(), arenaSelection.getMaximum());
+                break;
+            default:
+                return;
+        }
+
+        arena.setDisplayName(Objects.requireNonNull(this.getDefaultDisplayName(arenaType)).replace("{arena-name}", arenaName));
+
+        arena.createArena();
+        player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ARENA_CREATED)
+                .replace("{arena-name}", arenaName)
+                .replace("{arena-type}", arenaType.name())
+        );
+    }
+
+    /**
+     * Get the default display name for the specified arena type.
+     * 获取指定竞技场类型的默认显示名称。
+     *
+     * @param arenaType The type of the arena.
+     *                  竞技场的类型。
+     * @return The default display name.
+     *         默认的显示名称。
+     */
+    private String getDefaultDisplayName(ArenaType arenaType) {
+        LocaleService localeService = this.plugin.getService(LocaleService.class);
+
+        switch (arenaType) {
+            case SHARED:
+                return localeService.getString(SettingsLocaleImpl.CONFIG_ARENA_DEFAULT_DISPLAY_NAME_SHARED);
+            case STANDALONE:
+                return localeService.getString(SettingsLocaleImpl.CONFIG_ARENA_DEFAULT_DISPLAY_NAME_STANDALONE);
+            case FFA:
+                return localeService.getString(SettingsLocaleImpl.CONFIG_ARENA_DEFAULT_DISPLAY_NAME_FFA);
+        }
+
+        return null;
+    }
+}

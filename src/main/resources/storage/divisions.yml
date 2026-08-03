@@ -1,0 +1,113 @@
+divisions:
+  Bronze:
+    display-name: "Bronze"
+    description: "The Bronze division"
+    durability: 0
+    icon: COPPER_INGOT
+    tier-levels:
+      I:
+        required-wins: 0
+      II:
+        required-wins: 10
+      III:
+        required-wins: 40
+      IV:
+        required-wins: 80
+      V:
+        required-wins: 100
+  Silver:
+    display-name: "Silver"
+    description: "The Silver division"
+    durability: 0
+    icon: IRON_INGOT
+    tier-levels:
+      I:
+        required-wins: 120
+      II:
+        required-wins: 150
+      III:
+        required-wins: 180
+      IV:
+        required-wins: 200
+      V:
+        required-wins: 220
+  Gold:
+    display-name: "Gold"
+    description: "The Gold division"
+    durability: 0
+    icon: GOLD_INGOT
+    tier-levels:
+      I:
+        required-wins: 250
+      II:
+        required-wins: 300
+      III:
+        required-wins: 350
+      IV:
+        required-wins: 400
+      V:
+        required-wins: 500
+  Platinum:
+    display-name: "Platinum"
+    description: "The Platinum division"
+    durability: 4
+    icon: EMERALD
+    tier-levels:
+      I:
+        required-wins: 1000
+      II:
+        required-wins: 1150
+      III:
+        required-wins: 1250
+      IV:
+        required-wins: 1350
+      V:
+        required-wins: 1500
+  Diamond:
+    display-name: "Diamond"
+    description: "The Diamond division"
+    durability: 0
+    icon: DIAMOND
+    tier-levels:
+      I:
+        required-wins: 1600
+      II:
+        required-wins: 1800
+      III:
+        required-wins: 1900
+      IV:
+        required-wins: 2000
+      V:
+        required-wins: 2200
+  Master:
+    display-name: "Master"
+    description: "The Master division"
+    durability: 12
+    icon: NETHERITE_INGOT
+    tier-levels:
+      I:
+        required-wins: 2500
+      II:
+        required-wins: 3000
+      III:
+        required-wins: 3500
+      IV:
+        required-wins: 4000
+      V:
+        required-wins: 5000
+  Grandmaster:
+    display-name: "Grandmaster"
+    description: "The Grandmaster division"
+    durability: 6
+    icon: NETHER_STAR
+    tier-levels:
+      I:
+        required-wins: 6000
+      II:
+        required-wins: 7000
+      III:
+        required-wins: 8000
+      IV:
+        required-wins: 9000
+      V:
+        required-wins: 10000

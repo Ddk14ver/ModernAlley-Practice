@@ -1,0 +1,10 @@
+ENTITY_ATTACK:
+  - "Was that lag, {victim}, or just a skill issue?"
+FALL:
+  - "{killer} taught {victim} a valuable lesson about gravity."
+VOID:
+  - "{killer} just hit the delete key on {victim}."
+LAVA:
+  - "{killer} suggested a quick swim for {victim}. In lava."
+GENERIC:
+  - "{victim} just wasn't good enough to beat {killer}."

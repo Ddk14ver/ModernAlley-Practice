@@ -1,0 +1,93 @@
+package dev.revere.alley.feature.explosives.internal;
+
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.bootstrap.AlleyContext;
+import dev.revere.alley.bootstrap.annotation.Service;
+import dev.revere.alley.core.config.ConfigService;
+import dev.revere.alley.core.locale.LocaleService;
+import dev.revere.alley.core.locale.internal.impl.SettingsLocaleImpl;
+import dev.revere.alley.feature.explosives.ExplosiveService;
+import dev.revere.alley.feature.explosives.listener.ExplosiveListener;
+import lombok.Getter;
+import lombok.Setter;
+
+/**
+ * @author Emmy
+ * @作者 Emmy
+ * @project Alley
+ * @项目 Alley
+ * @since 11/06/2025
+ * @自 11/06/2025
+ */
+@Setter
+@Getter
+@Service(provides = ExplosiveService.class, priority = 370)
+public class ExplosiveServiceImpl implements ExplosiveService {
+    private final AlleyPlugin plugin;
+    private final ConfigService configService;
+    private final LocaleService localeService;
+
+    private boolean enabled;
+
+    private double horizontalFireballKnockback;
+    private double verticalFireballKnockback;
+    private double fireballExplosionRange;
+    private double fireballThrowSpeed;
+
+    private double tntExplosionRange;
+    private int tntFuseTicks;
+
+    /**
+     * DI Constructor for the ExplosiveServiceImpl class.
+     * ExplosiveServiceImpl类的依赖注入构造函数。
+     *
+     * @param plugin        The main AlleyPlugin instance.
+     *                      主要的AlleyPlugin实例。
+     * @param configService The configuration service.
+     *                      配置服务。
+     * @param localeService The locale service.
+     *                      语言环境服务。
+     */
+    public ExplosiveServiceImpl(AlleyPlugin plugin, ConfigService configService, LocaleService localeService) {
+        this.plugin = plugin;
+        this.configService = configService;
+        this.localeService = localeService;
+    }
+
+    @Override
+    public void initialize(AlleyContext context) {
+        this.enabled = this.localeService.getBoolean(SettingsLocaleImpl.EXPLOSIVE_ENABLED);
+
+        if (this.enabled) {
+            this.assignValues();
+            this.registerListener();
+        }
+    }
+
+    private void assignValues() {
+        this.horizontalFireballKnockback = this.localeService.getDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_HORIZONTAL_KB_VALUE);
+        this.verticalFireballKnockback = this.localeService.getDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_VERTICAL_KB_VALUE);
+        this.fireballExplosionRange = this.localeService.getDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_EXPLOSION_RANGE_VALUE);
+        this.fireballThrowSpeed = this.localeService.getDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_THROW_SPEED_VALUE);
+
+        this.tntFuseTicks = this.localeService.getInt(SettingsLocaleImpl.EXPLOSIVE_TNT_FUSE_TICKS_VALUE);
+        this.tntExplosionRange = this.localeService.getDouble(SettingsLocaleImpl.EXPLOSIVE_TNT_EXPLOSION_RANGE_VALUE);
+    }
+
+    @Override
+    public void save() {
+        this.localeService.setBoolean(SettingsLocaleImpl.EXPLOSIVE_ENABLED, this.enabled);
+
+        this.localeService.setDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_HORIZONTAL_KB_VALUE, this.horizontalFireballKnockback);
+        this.localeService.setDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_VERTICAL_KB_VALUE, this.verticalFireballKnockback);
+        this.localeService.setDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_EXPLOSION_RANGE_VALUE, this.fireballExplosionRange);
+        this.localeService.setDouble(SettingsLocaleImpl.EXPLOSIVE_FIREBALL_THROW_SPEED_VALUE, this.fireballThrowSpeed);
+
+        this.localeService.setInt(SettingsLocaleImpl.EXPLOSIVE_TNT_FUSE_TICKS_VALUE, this.tntFuseTicks);
+        this.localeService.setDouble(SettingsLocaleImpl.EXPLOSIVE_TNT_EXPLOSION_RANGE_VALUE, this.tntExplosionRange);
+    }
+
+    private void registerListener() {
+        this.plugin.getServer().getPluginManager().registerEvents(new ExplosiveListener(), this.plugin);
+    }
+}

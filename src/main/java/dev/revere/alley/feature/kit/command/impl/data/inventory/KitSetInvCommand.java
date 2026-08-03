@@ -1,0 +1,57 @@
+package dev.revere.alley.feature.kit.command.impl.data.inventory;
+
+import dev.revere.alley.common.InventoryUtil;
+import dev.revere.alley.common.text.CC;
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.kit.KitService;
+import dev.revere.alley.library.command.BaseCommand;
+import dev.revere.alley.library.command.CommandArgs;
+import dev.revere.alley.library.command.annotation.CommandData;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+
+/**
+ * @author Emmy
+ * @project Alley
+ * @date 28/04/2024 - 22:23
+ */
+public class KitSetInvCommand extends BaseCommand {
+    @CommandData(
+            name = "kit.setinventory",
+            aliases = "kit.setinv",
+            isAdminOnly = true,
+            usage = "kit setinventory <kitName>",
+            description = "Set the inventory and armor of a kit to your current inventory and armor."
+    )
+    @Override
+    public void onCommand(CommandArgs command) {
+        Player player = command.getPlayer();
+        String[] args = command.getArgs();
+
+        if (args.length < 1) {
+            command.sendUsage();
+            return;
+        }
+
+        KitService kitService = this.plugin.getService(KitService.class);
+        Kit kit = kitService.getKit(args[0]);
+        if (kit == null) {
+            player.sendMessage(CC.translate(this.getString(GlobalMessagesLocaleImpl.KIT_NOT_FOUND)));
+            return;
+        }
+
+        ItemStack[] inventory = InventoryUtil.cloneItemStackArray(player.getInventory().getContents());
+        ItemStack[] armor = InventoryUtil.cloneItemStackArray(player.getInventory().getArmorContents());
+
+        kit.setItems(inventory);
+        kit.setArmor(armor);
+        kitService.saveKit(kit);
+
+        // Clear all saved layouts for this kit across all players —
+        // old layouts are invalid now that the kit inventory changed.
+        this.plugin.getService(dev.revere.alley.core.profile.ProfileService.class).clearLayoutsForKit(kit);
+
+        player.sendMessage(CC.translate(this.getString(GlobalMessagesLocaleImpl.KIT_INVENTORY_SET).replace("{kit-name}", kit.getName())));
+    }
+}

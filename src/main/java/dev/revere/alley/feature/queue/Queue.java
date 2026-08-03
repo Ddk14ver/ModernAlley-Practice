@@ -1,0 +1,325 @@
+package dev.revere.alley.feature.queue;
+
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.common.text.CC;
+import dev.revere.alley.core.locale.LocaleService;
+import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
+import dev.revere.alley.core.profile.enums.ProfileState;
+import dev.revere.alley.feature.hotbar.HotbarService;
+import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.match.MatchService;
+import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.party.Party;
+import dev.revere.alley.feature.party.PartyService;
+import lombok.Getter;
+import lombok.Setter;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+
+import java.util.LinkedList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * @author Remi
+ * @project Alley
+ * @date 5/21/2024
+ */
+@Getter
+@Setter
+public class Queue {
+    private final Kit kit;
+    private final boolean ranked;
+    private final boolean duos;
+    private final LinkedList<QueueProfile> profiles = new LinkedList<>();
+    private final long maxQueueTime = 300000L; // 5 minutes
+    // 5 分钟
+
+    /**
+     * Constructor for the Queue class.
+     * Queue 类的构造函数。
+     *
+     * @param kit The kit associated with the queue.
+     *            与队列关联的装备包。
+     */
+    public Queue(Kit kit, boolean ranked, boolean duos) {
+        this.kit = kit;
+        this.ranked = ranked;
+        this.duos = duos;
+    }
+
+    /**
+     * Gets the amount of people playing that queue.
+     * 获取该队列中正在进行的比赛数量。
+     *
+     * @return The amount of people playing that queue.
+     *         正在该队列中进行比赛的玩家数量。
+     */
+    public int getQueueFightCount() {
+        MatchService matchService = AlleyPlugin.getInstance().getService(MatchService.class);
+        return (int) matchService.getMatches().stream()
+                .filter(match -> match.getQueue() != null && match.getQueue().equals(this))
+                .count();
+    }
+
+    /**
+     * Gets the queue type.
+     * 获取队列类型。
+     *
+     * @return The queue type.
+     *         队列类型。
+     */
+    public String getQueueType() {
+        return (this.ranked ? "Ranked" : "Unranked") + (this.duos ? " Duos" : "");
+    }
+
+    /**
+     * Adds a player to the queue.
+     * 将玩家添加到队列中。
+     *
+     * @param player The player to add.
+     *               要添加的玩家。
+     */
+    public void addPlayer(Player player, int elo) {
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        PartyService partyService = AlleyPlugin.getInstance().getService(PartyService.class);
+        HotbarService hotbarService = AlleyPlugin.getInstance().getService(HotbarService.class);
+
+        UUID uuid = player.getUniqueId();
+
+        Profile profile = profileService.getProfile(uuid);
+        Party party = partyService.getParty(player);
+
+        if (this.isDuos() && party != null) {
+            for (UUID memberId : party.getMembers()) {
+                Profile memberProfile = profileService.getProfile(memberId);
+                if (memberProfile != null && memberProfile.getQueueProfile() != null) {
+                    player.sendMessage(CC.translate("&cSomeone in your party is already in a queue."));
+                    return;
+                }
+            }
+        } else if (this.profiles.stream().anyMatch(queueProfile -> queueProfile.getUuid().equals(uuid))) {
+            player.sendMessage(CC.translate("&cYou're already in a queue."));
+            return;
+        }
+
+        if (!this.isDuos() && party != null) {
+            player.sendMessage(CC.translate("&cYou cannot queue for 1v1 while in a party."));
+            return;
+        }
+
+
+        if (this.isDuos()) {
+            if (party != null && !party.getLeader().equals(player)) {
+                player.sendMessage(CC.translate("&cOnly the party leader can queue."));
+                return;
+            }
+
+            if (party != null && party.getMembers().size() > 2) {
+                player.sendMessage(CC.translate("&cYour party size is too large for duo queues."));
+                return;
+            }
+
+            if (party != null && party.getMembers().size() == 2) {
+                for (UUID memberId : party.getMembers()) {
+                    if (Bukkit.getPlayer(memberId) == null || !Bukkit.getPlayer(memberId).isOnline()) {
+                        player.sendMessage(CC.translate("&cAll party members must be online to queue."));
+                        return;
+                    }
+
+                    Profile memberProfile = profileService.getProfile(memberId);
+                    if (memberProfile.getState() != ProfileState.LOBBY) {
+                        player.sendMessage(CC.translate("&cAll party members must be in the lobby to queue."));
+                        return;
+                    }
+                }
+            } else {
+                if (profile.getState() != ProfileState.LOBBY) {
+                    player.sendMessage(AlleyPlugin.getInstance().getService(LocaleService.class).getString(GlobalMessagesLocaleImpl.ERROR_INVALID_PLAYER));
+                    return;
+                }
+
+                if (party == null || party.getMembers().size() == 1) {
+                    player.sendMessage(CC.translate("&eYou are queuing for duos solo. A random teammate will be selected."));
+                }
+            }
+        } else {
+            if (profile.getState() != ProfileState.LOBBY) {
+                player.sendMessage(AlleyPlugin.getInstance().getService(LocaleService.class).getString(GlobalMessagesLocaleImpl.ERROR_INVALID_PLAYER));
+                return;
+            }
+        }
+
+        QueueProfile queueProfile = new QueueProfile(this, uuid);
+        queueProfile.setElo(elo);
+
+        profile.setQueueProfile(queueProfile);
+        profile.setState(ProfileState.WAITING);
+
+        this.profiles.add(queueProfile);
+
+        if (this.isDuos() && party != null && party.getMembers().size() > 1) {
+            for (UUID memberId : party.getMembers()) {
+                if (!memberId.equals(uuid)) {
+                    {
+                        Profile memberProfile = profileService.getProfile(memberId);
+                        if (memberProfile != null) {
+                            memberProfile.setQueueProfile(queueProfile);
+                            memberProfile.setState(ProfileState.WAITING);
+                            Player memberPlayer = Bukkit.getPlayer(memberId);
+                            hotbarService.applyHotbarItems(memberPlayer);
+                            if (memberPlayer != null) {
+                                memberPlayer.sendMessage(CC.translate("&aYour party leader has joined the &6" + queueProfile.getQueue().getKit().getDisplayName() + " &aqueue."));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        LocaleService localeService = AlleyPlugin.getInstance().getService(LocaleService.class);
+
+        if (localeService.getBoolean(GlobalMessagesLocaleImpl.QUEUE_JOINED_BOOLEAN)) {
+            List<String> joinMessage = localeService.getStringList(GlobalMessagesLocaleImpl.QUEUE_JOINED);
+            for (String line : joinMessage) {
+                line = line.replace("{queue-type}", queueProfile.getQueue().getQueueType());
+                line = line.replace("{kit}", queueProfile.getQueue().getKit().getDisplayName());
+                player.sendMessage(CC.translate(line));
+            }
+        }
+
+        hotbarService.applyHotbarItems(player);
+    }
+
+    public boolean reserveAfterMatch(Player player, int elo) {
+        if (this.ranked || this.duos || player == null) return false;
+
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        PartyService partyService = AlleyPlugin.getInstance().getService(PartyService.class);
+        Profile profile = profileService.getProfile(player.getUniqueId());
+        if (profile == null || profile.getState() != ProfileState.PLAYING
+                || profile.getMatch() == null || profile.getMatch().getState() != MatchState.ENDING_MATCH) {
+            return false;
+        }
+        if (partyService.getParty(player) != null || profile.getQueueProfile() != null) {
+            return false;
+        }
+
+        QueueProfile queueProfile = new QueueProfile(this, player.getUniqueId());
+        queueProfile.setElo(elo);
+        queueProfile.setReady(false);
+        profile.setQueueProfile(queueProfile);
+        this.profiles.add(queueProfile);
+        return true;
+    }
+
+    public boolean activateAfterMatch(Player player) {
+        if (player == null) return false;
+
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        Profile profile = profileService.getProfile(player.getUniqueId());
+        QueueProfile queueProfile = profile == null ? null : profile.getQueueProfile();
+        if (queueProfile == null || queueProfile.getQueue() != this || queueProfile.isReady()
+                || !this.profiles.contains(queueProfile) || profile.getState() != ProfileState.LOBBY) {
+            return false;
+        }
+
+        queueProfile.setReady(true);
+        profile.setState(ProfileState.WAITING);
+        AlleyPlugin.getInstance().getService(HotbarService.class).applyHotbarItems(player);
+        player.sendMessage(CC.translate("&aPlay Again: queued for &6" + this.kit.getDisplayName() + "&a!"));
+        return true;
+    }
+
+    /**
+     * Removes a player from the queue.
+     * 将玩家从队列中移除。
+     *
+     * @param queueProfile The queue profile to remove.
+     *                     要移除的队列数据。
+     */
+    public void removePlayer(QueueProfile queueProfile) {
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        PartyService partyService = AlleyPlugin.getInstance().getService(PartyService.class);
+        HotbarService hotbarService = AlleyPlugin.getInstance().getService(HotbarService.class);
+
+        UUID playerToRemoveUUID = queueProfile.getUuid();
+        Profile playerToRemoveProfile = profileService.getProfile(playerToRemoveUUID);
+        Player playerToRemove = Bukkit.getPlayer(playerToRemoveUUID);
+
+        Party party = playerToRemove == null ? null : partyService.getParty(playerToRemove);
+        if (this.isDuos() && party != null && playerToRemove != null
+                && party.getLeader().getUniqueId().equals(playerToRemove.getUniqueId())) {
+            for (UUID memberId : party.getMembers()) {
+                Profile memberProfile = profileService.getProfile(memberId);
+                if (memberProfile != null && memberProfile.getQueueProfile() != null) {
+                    memberProfile.setQueueProfile(null);
+                    memberProfile.setState(ProfileState.LOBBY);
+                    Player memberPlayer = Bukkit.getPlayer(memberId);
+                    if (memberPlayer != null) {
+                        hotbarService.applyHotbarItems(memberPlayer);
+                        memberPlayer.sendMessage(CC.translate("&cYour party has left the queue."));
+                    }
+                }
+            }
+            this.profiles.remove(queueProfile);
+        } else {
+            this.profiles.remove(queueProfile);
+
+            if (playerToRemoveProfile != null) {
+                playerToRemoveProfile.setQueueProfile(null);
+                playerToRemoveProfile.setState(ProfileState.LOBBY);
+            }
+
+            if (playerToRemove != null) {
+                hotbarService.applyHotbarItems(playerToRemove);
+                LocaleService localeService = AlleyPlugin.getInstance().getService(LocaleService.class);
+
+                if (localeService.getBoolean(GlobalMessagesLocaleImpl.QUEUE_LEFT_BOOLEAN)) {
+                    List<String> joinMessage = localeService.getStringList(GlobalMessagesLocaleImpl.QUEUE_LEFT);
+                    for (String line : joinMessage) {
+                        line = line.replace("{queue-type}", queueProfile.getQueue().getQueueType());
+                        line = line.replace("{kit}", queueProfile.getQueue().getKit().getDisplayName());
+                        playerToRemove.sendMessage(CC.translate(line));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Gets the profile of a player.
+     * 获取玩家的数据。
+     *
+     * @param uuid The UUID of the player.
+     *             玩家的 UUID。
+     * @return The profile object.
+     *         玩家的数据对象。
+     */
+    public Profile getProfile(UUID uuid) {
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        return profileService.getProfile(uuid);
+    }
+
+    public int getTotalPlayerCount() {
+        PartyService partyService = AlleyPlugin.getInstance().getService(PartyService.class);
+
+        int count = 0;
+        for (QueueProfile queueProfile : this.profiles) {
+            Player leader = Bukkit.getPlayer(queueProfile.getUuid());
+            if (leader != null) {
+                Party party = partyService.getParty(leader);
+                if (party != null && party.getMembers().size() > 1) {
+                    count += party.getMembers().size();
+                } else {
+                    count += 1;
+                }
+            } else {
+                count += 1;
+            }
+        }
+        return count;
+    }
+}
