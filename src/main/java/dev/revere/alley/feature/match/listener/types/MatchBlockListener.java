@@ -302,6 +302,67 @@ public class MatchBlockListener implements Listener {
         }
     }
 
+    /**
+     * Blocks destroyed by entity explosions (TNT minecarts, end crystals, creepers, …)
+     * in a BreakArenaBlocks match are restored at the end of the match, so they must not
+     * drop any items — the same rule as player-broken arena blocks.
+     * 实体爆炸（TNT矿车、末影水晶、苦力怕等）在开启 BreakArenaBlocks 的比赛中破坏的方块，
+     * 会在对局结束时恢复，因此不应掉落任何物品——与玩家手动破坏竞技场方块一致。
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEntityExplode(EntityExplodeEvent event) {
+        Match match = findBreakArenaBlocksMatch(event.getLocation());
+        if (match == null) return;
+
+        event.setYield(0.0f);
+        for (Block block : new ArrayList<>(event.blockList())) {
+            match.addBlockToBrokenBlocksMap(block.getState(), block.getLocation());
+        }
+    }
+
+    /**
+     * Same as {@link #onEntityExplode} but for block-triggered explosions
+     * (respawn anchors, beds, …).
+     * 与 {@link #onEntityExplode} 相同，但针对方块触发的爆炸（重生锚、床等）。
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockExplode(BlockExplodeEvent event) {
+        Match match = findBreakArenaBlocksMatch(event.getBlock().getLocation());
+        if (match == null) return;
+
+        event.setYield(0.0f);
+        for (Block block : new ArrayList<>(event.blockList())) {
+            match.addBlockToBrokenBlocksMap(block.getState(), block.getLocation());
+        }
+    }
+
+    /**
+     * Finds a running match whose kit has BreakArenaBlocks enabled and whose arena bounds
+     * contain the given location.
+     * 查找已开启 BreakArenaBlocks 的进行中比赛，其竞技场边界包含给定位置。
+     */
+    private Match findBreakArenaBlocksMatch(Location location) {
+        if (location == null) return null;
+        for (Match match : AlleyPlugin.getInstance().getService(MatchService.class).getMatches()) {
+            if (match.getState() != MatchState.RUNNING) continue;
+            if (!match.getKit().isSettingEnabled(KitSettingBreakArenaBlocksImpl.class)) continue;
+            Location min = match.getArena().getMinimum();
+            Location max = match.getArena().getMaximum();
+            if (min == null || max == null) continue;
+            if (isWithinBounds(location, min, max)) return match;
+        }
+        return null;
+    }
+
+    private boolean isWithinBounds(Location location, Location min, Location max) {
+        double x = location.getX();
+        double y = location.getY();
+        double z = location.getZ();
+        return x >= Math.min(min.getX(), max.getX()) && x <= Math.max(min.getX(), max.getX())
+                && y >= Math.min(min.getY(), max.getY()) && y <= Math.max(min.getY(), max.getY())
+                && z >= Math.min(min.getZ(), max.getZ()) && z <= Math.max(min.getZ(), max.getZ());
+    }
+
     @EventHandler
     private void onBlockPlace(BlockPlaceEvent event) {
         Player player = event.getPlayer();
