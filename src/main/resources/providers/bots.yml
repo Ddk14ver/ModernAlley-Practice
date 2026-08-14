@@ -49,7 +49,7 @@ profiles:
     display-name: "&cHard"
     icon: DIAMOND_SWORD
     cps: 14.0
-    maxreach: 3.0
+    maxreach: 2.8
     swing-range: 6.5
     minreach: 1.00
     movement-speed: 1.0
