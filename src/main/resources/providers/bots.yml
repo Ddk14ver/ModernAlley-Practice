@@ -35,7 +35,7 @@ profiles:
     minreach: 1.25
     movement-speed: 1.0
     aim-speed: 18.0
-    aim-error: 0.12
+    aim-error: 0.24
     ping: 0
     w-tap: true
     strafe: true
