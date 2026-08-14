@@ -62,6 +62,18 @@ public interface LevelService extends Service {
     LevelData getLevel(int elo);
 
     /**
+     * Gets the level directly above the one the given Elo currently belongs to.
+     * Returns null when the Elo already belongs to the highest level.
+     * 获取给定 Elo 当前所属等级的下一个等级。若 Elo 已属于最高等级则返回 null。
+     *
+     * @param elo The Elo rating to check.
+     *            要检查的 Elo 评分。
+     * @return The next LevelData, or null if the player is at the max level.
+     *         下一个 LevelData，如果玩家已处于最高等级则返回 null。
+     */
+    LevelData getNextLevel(int elo);
+
+    /**
      * Gets a level player by its unique name (case-insensitive).
      * 通过唯一名称获取等级（不区分大小写）。
      *

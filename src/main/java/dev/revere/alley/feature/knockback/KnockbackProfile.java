@@ -1,5 +1,6 @@
 package dev.revere.alley.feature.knockback;
 
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldHitDelay;
 import lombok.Getter;
 import org.bukkit.configuration.file.FileConfiguration;
 /**
@@ -35,7 +36,6 @@ public class KnockbackProfile {
     private boolean packetDelayEnabled;
     private int packetDelayTicks;
     private double hitboxLength, hitboxHeight;
-    private boolean legacyComboResidual;
 
     public KnockbackProfile(String name, FileConfiguration config) {
         this.name = name;
@@ -49,7 +49,7 @@ public class KnockbackProfile {
         verticalGround = config.getDouble("vertical.ground", 0.36);
         verticalAir = config.getDouble("vertical.air", 0.36);
         verticalSprintExtra = config.getDouble("vertical.sprint_extra", 0.1);
-        hitDelay = config.getInt("hit_delay", 20);
+        hitDelay = config.getInt("hit_delay", KitSettingOldHitDelay.DEFAULT_DELAY);
         yLimit = config.getDouble("y_limit", 3.0);
         disableDownwardKb = config.getBoolean("disable_downward_kb", false);
         stopSprint = config.getBoolean("stop_sprint", false);
@@ -78,6 +78,5 @@ public class KnockbackProfile {
         packetDelayTicks = config.getInt("packet.delay.ticks", 2);
         hitboxLength = config.getDouble("hitbox.length", 0.6);
         hitboxHeight = config.getDouble("hitbox.height", 1.8);
-        legacyComboResidual = config.getBoolean("legacy.combo_residual", false);
     }
 }

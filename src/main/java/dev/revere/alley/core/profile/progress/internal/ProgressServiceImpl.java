@@ -37,15 +37,26 @@ public class ProgressServiceImpl implements ProgressService {
         ProfileUnrankedKitData kitData = profileData.getUnrankedKitData().get(kitName);
 
         if (kitData == null) {
-            return new PlayerProgress(0, 0, "N/A", true);
+            return new PlayerProgress(0, 0, 0, "N/A", true);
         }
 
-        int wins = kitData.getWins();
+        // Division progression counts wins from every mode (unranked solo/duo, ranked, tournament).
+        int wins = profileData.getKitWins(kitName);
         Division currentDivision = kitData.getDivision();
+
+        if (currentDivision == null) {
+            return new PlayerProgress(wins, 0, 0, "N/A", true);
+        }
+
         DivisionTier currentTier = kitData.getTier();
 
         List<DivisionTier> tiers = currentDivision.getTiers();
         int tierIndex = tiers.indexOf(currentTier);
+
+        // The floor is the required wins of the player's current tier; the bar/percentage measures
+        // progress from this floor up to the next tier's required wins.
+        // 起点是当前层级所需胜场；进度条/百分比衡量从该起点推进到下一层级所需胜场的进度。
+        int currentTierWins = currentTier == null ? 0 : currentTier.getRequiredWins();
 
         int nextTierWins;
         boolean isMaxRank = false;
@@ -57,13 +68,13 @@ public class ProgressServiceImpl implements ProgressService {
             if (nextDivision != null) {
                 nextTierWins = nextDivision.getTiers().get(0).getRequiredWins();
             } else {
-                nextTierWins = currentTier.getRequiredWins();
+                nextTierWins = currentTierWins;
                 isMaxRank = true;
             }
         }
 
         String nextRankName = isMaxRank ? "Max Rank" : profile.getNextDivisionAndTier(kitName);
 
-        return new PlayerProgress(wins, nextTierWins, nextRankName, isMaxRank);
+        return new PlayerProgress(wins, currentTierWins, nextTierWins, nextRankName, isMaxRank);
     }
 }

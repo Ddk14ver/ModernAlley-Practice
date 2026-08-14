@@ -91,6 +91,12 @@ public class CoinRewardService implements dev.revere.alley.bootstrap.lifecycle.S
         sendMessage(player, "+" + tournamentLoss + " coins", "&7Tournament Loss");
     }
 
+    /** Adds a challenge reward without sending the generic match reward message. */
+    public void rewardChallenge(Player player, int amount) {
+        if (amount < 0) return;
+        addCoins(player, amount);
+    }
+
     private void addCoins(Player player, int amount) {
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());

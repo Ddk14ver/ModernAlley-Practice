@@ -50,6 +50,9 @@ public abstract class BaseMatchScoreboard implements MatchScoreboard {
         String configPath = match.isTeamMatch() ? getTeamConfigPath() : getSoloConfigPath();
 
         for (String line : AlleyPlugin.getInstance().getService(ConfigService.class).getScoreboardConfig().getStringList(configPath)) {
+            if (!MatchScoreboardSettings.shouldDisplay(profile, line)) {
+                continue;
+            }
             scoreboardLines.add(replacePlaceholders(line, profile, player, you, opponent));
         }
 

@@ -3,12 +3,15 @@ disable_downward_kb: false
 horizontal:
   ground: 0.651
   air: 0.59
+  # Vanilla 1.21.11 sprint bonus is ~62% of the base horizontal knockback (0.5/0.8 strength).
+  # 原版1.21.11冲刺加成约为基础水平击退的62%（0.5/0.8强度），0.4/0.651 接近该比例。
   sprint_extra: 0.25
 vertical:
   ground: 0.29
   air: 0.27
   sprint_extra: 0.05
-hit_delay: 10
+hit_delay: 20
+hit_delay_format: nms_window
 y_limit: 2.6
 stop_sprint: true
 projectile:

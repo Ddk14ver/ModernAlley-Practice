@@ -15,11 +15,8 @@ import org.bukkit.inventory.ItemStack;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 25/01/2025
- * 日期：25/01/2025
  */
 @Getter
 @AllArgsConstructor

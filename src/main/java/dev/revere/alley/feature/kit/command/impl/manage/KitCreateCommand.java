@@ -5,6 +5,7 @@ import dev.revere.alley.common.reflect.ReflectionService;
 import dev.revere.alley.common.reflect.internal.types.ActionBarReflectionServiceImpl;
 import dev.revere.alley.common.text.CC;
 import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
@@ -15,11 +16,8 @@ import org.bukkit.inventory.ItemStack;
 
 /**
  * @author Emmy
- * 作者: Emmy
  * @project Alley
- * 项目: Alley
  * @date 20/05/2024 - 13:06
- * 日期: 20/05/2024 - 13:06
  */
 public class KitCreateCommand extends BaseCommand {
     @CommandData(
@@ -54,6 +52,12 @@ public class KitCreateCommand extends BaseCommand {
         }
 
         kitService.createKit(kitName, inventory, armor, icon);
+
+        Kit createdKit = kitService.getKit(kitName);
+        if (createdKit != null) {
+            createdKit.setOffhand(player.getInventory().getItemInOffHand());
+            kitService.saveKit(createdKit);
+        }
 
         String message = this.getString(GlobalMessagesLocaleImpl.KIT_CREATED).replace("{kit-name}", kitName);
 

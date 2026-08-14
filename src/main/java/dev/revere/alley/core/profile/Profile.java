@@ -14,6 +14,7 @@ import dev.revere.alley.feature.abilities.cooldown.AbilityCooldown;
 import dev.revere.alley.feature.division.Division;
 import dev.revere.alley.feature.division.DivisionService;
 import dev.revere.alley.feature.division.model.DivisionTier;
+import dev.revere.alley.feature.event.HostedEvent;
 import dev.revere.alley.feature.ffa.FFAMatch;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
@@ -58,6 +59,7 @@ public class Profile {
     private final Map<GlobalCooldown, AbilityCooldown> globalCooldowns;
 
     private Tournament tournament;
+    private HostedEvent gameEvent;
     private FFAMatch ffaMatch;
     private Match match;
     private Party party;

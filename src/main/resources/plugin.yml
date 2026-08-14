@@ -7,4 +7,4 @@ description: '${project.description}'
 website: https://discord.gg/revere
 softdepend:
   - PlaceholderAPI
-depend: [ FastAsyncWorldEdit, ProtocolLib, Citizens ]
+depend: [ FastAsyncWorldEdit, ProtocolLib ]

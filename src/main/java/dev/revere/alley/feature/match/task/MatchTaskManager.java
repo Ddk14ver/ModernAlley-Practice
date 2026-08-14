@@ -39,6 +39,7 @@ public class MatchTaskManager {
 
     public void handleStartingStage() {
         if (this.match.getRunnable().getStage() == 0) {
+            this.match.ensureLegacyCombatApplied();
             this.plugin.getServer().getScheduler().runTask(this.plugin, this.match::handleRoundStart);
             this.match.setState(MatchState.RUNNING);
 

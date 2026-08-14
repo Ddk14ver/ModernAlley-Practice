@@ -2,6 +2,7 @@ package dev.revere.alley.feature.layout.listener;
 
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.kit.KitService;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldOffhand;
 import dev.revere.alley.feature.layout.data.LayoutData;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
@@ -49,6 +50,9 @@ public class LayoutListener implements Listener {
                     dev.revere.alley.feature.kit.Kit kit = AlleyPlugin.getInstance().getService(KitService.class).getKit(kitName);
                     if (kit != null) {
                         player.getInventory().setArmorContents(kit.getArmor());
+                        if (!kit.isSettingEnabled(KitSettingOldOffhand.class)) {
+                            player.getInventory().setItemInOffHand(layout.getOffhand());
+                        }
                     }
 
                     player.sendMessage(CC.translate("&aYou have selected the layout &6" + layout.getDisplayName() + "&a."));

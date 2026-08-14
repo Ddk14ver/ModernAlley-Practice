@@ -34,13 +34,14 @@ public class ConfigServiceImpl implements ConfigService {
     private FileConfiguration settingsConfig, globalMessagesConfig, gameMessagesConfig, databaseConfig, kitsConfig, arenasConfig,
             scoreboardConfig, tabListConfig, divisionsConfig, menusConfig, titlesConfig, levelsConfig,
             pearlConfig, abilityConfig, visualsConfig, saltyMessagesConfig, yeetMessagesConfig,
-            nerdMessagesConfig, spigotCommunityMessagesConfig, texturesConfig, hotbarConfig, botConfig;
+            nerdMessagesConfig, spigotCommunityMessagesConfig, texturesConfig, hotbarConfig, botConfig,
+            challengesConfig;
 
     private final String[] configFileNames = {
             "database/database.yml",
 
             "messages/global-messages.yml", "messages/game-messages.yml",
-            "settings.yml", "menus.yml",
+            "settings.yml", "menus.yml", "challenges.yml",
 
             "storage/kits.yml", "storage/arenas.yml", "storage/divisions.yml", "storage/titles.yml", "storage/levels.yml",
 
@@ -179,6 +180,7 @@ public class ConfigServiceImpl implements ConfigService {
         this.scoreboardConfig = this.getConfig("providers/scoreboard.yml");
         this.hotbarConfig = this.getConfig("storage/hotbar.yml");
         this.botConfig = this.getConfig("providers/bots.yml");
+        this.challengesConfig = this.getConfig("challenges.yml");
         this.saltyMessagesConfig = this.getConfig("cosmetics/messages/salty_messages.yml");
         this.yeetMessagesConfig = this.getConfig("cosmetics/messages/yeet_messages.yml");
         this.nerdMessagesConfig = this.getConfig("cosmetics/messages/nerd_messages.yml");

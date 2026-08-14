@@ -2,6 +2,7 @@ package dev.revere.alley.feature.layout.menu.button.editor;
 
 import dev.revere.alley.library.menu.Button;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldOffhand;
 import dev.revere.alley.common.item.ItemBuilder;
 import dev.revere.alley.common.text.CC;
 import lombok.AllArgsConstructor;
@@ -42,6 +43,10 @@ public class LayoutResetItemsButton extends Button {
 
         player.getInventory().clear();
         player.getInventory().setContents(this.kit.getItems());
+        if (!this.kit.isSettingEnabled(KitSettingOldOffhand.class)) {
+            player.getInventory().setItemInOffHand(this.kit.getOffhand());
+            player.getOpenInventory().getTopInventory().setItem(35, this.kit.getOffhand());
+        }
         player.updateInventory();
     }
 }

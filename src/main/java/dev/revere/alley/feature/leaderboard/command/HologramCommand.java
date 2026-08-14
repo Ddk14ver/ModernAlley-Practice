@@ -10,10 +10,13 @@ import dev.revere.alley.feature.leaderboard.hologram.LeaderboardHologram;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
+import dev.revere.alley.library.command.annotation.CompleterData;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -25,6 +28,53 @@ import java.util.Optional;
  * 管理排行榜全息图的管理员命令。
  */
 public class HologramCommand extends BaseCommand {
+
+    @CompleterData(name = "hologram")
+    public List<String> hologramCompleter(CommandArgs command) {
+        List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
+
+        if (!command.getSender().hasPermission(this.getAdminPermission())) {
+            return completion;
+        }
+
+        if (args.length == 1) {
+            completion.addAll(Arrays.asList(
+                    "create", "delete", "remove", "list", "tp", "teleport",
+                    "movehere", "setstat", "settype", "setkit", "toggle"
+            ));
+            return completion;
+        }
+
+        if (args.length == 2) {
+            String sub = args[0].toLowerCase();
+            if (sub.equals("delete") || sub.equals("remove") || sub.equals("tp") || sub.equals("teleport")
+                    || sub.equals("movehere") || sub.equals("setstat") || sub.equals("settype")
+                    || sub.equals("setkit") || sub.equals("toggle")) {
+                this.plugin.getService(HologramManager.class).getHolograms()
+                        .forEach(hologram -> completion.add(hologram.getName()));
+            }
+            return completion;
+        }
+
+        if (args.length == 3) {
+            String sub = args[0].toLowerCase();
+            if (sub.equals("create") || sub.equals("settype")) {
+                Arrays.stream(LeaderboardType.values()).forEach(type -> completion.add(type.name()));
+            } else if (sub.equals("setkit")) {
+                completion.add("all");
+                this.plugin.getService(KitService.class).getKits().forEach(kit -> completion.add(kit.getName()));
+            }
+            return completion;
+        }
+
+        if (args.length == 4 && args[0].equalsIgnoreCase("create")) {
+            completion.add("all");
+            this.plugin.getService(KitService.class).getKits().forEach(kit -> completion.add(kit.getName()));
+        }
+
+        return completion;
+    }
 
     @CommandData(
             name = "hologram",

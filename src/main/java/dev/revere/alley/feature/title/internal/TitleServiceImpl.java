@@ -206,6 +206,40 @@ public class TitleServiceImpl implements TitleService {
     }
 
     /**
+     * Deletes a custom title. System titles (tied to kits) cannot be deleted.
+     * 删除自定义头衔。系统头衔（与套件绑定）无法被删除。
+     *
+     * @param title the title to delete
+     * @return true if the title was deleted, false if it was a system title
+     */
+    public boolean deleteTitle(TitleRecord title) {
+        if (title.getKit() != null) {
+            return false;
+        }
+
+        // Resolve the map key by identity to stay safe after renames.
+        String key = null;
+        for (Map.Entry<String, TitleRecord> entry : this.customTitles.entrySet()) {
+            if (entry.getValue() == title) {
+                key = entry.getKey();
+                break;
+            }
+        }
+        if (key == null) {
+            key = title.getName().toLowerCase();
+        }
+
+        this.customTitles.remove(key);
+
+        FileConfiguration config = this.configService.getTitlesConfig();
+        config.set("custom-titles." + key, null);
+        File titlesFile = this.configService.getConfigFile("storage/titles.yml");
+        this.configService.saveConfig(titlesFile, config);
+
+        return true;
+    }
+
+    /**
      * Renames a custom title.
      */
     public void renameTitle(TitleRecord title, String newName) {

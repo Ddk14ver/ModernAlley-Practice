@@ -69,7 +69,7 @@ public class BukkitCommand extends Command {
             if (completer != null) {
                 completions = completer.onTabComplete(sender, this, alias, args);
             }
-            if (completions == null && executor instanceof TabCompleter) {
+            if ((completions == null || completions.isEmpty()) && executor instanceof TabCompleter) {
                 completions = ((TabCompleter) executor).onTabComplete(sender, this, alias, args);
             }
         } catch (Throwable ex) {

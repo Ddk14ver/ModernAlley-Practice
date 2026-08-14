@@ -1,4 +1,4 @@
-# 1.7-style knockback profile: the same values as 1_8, with residual combo delivery.
+# 1.7-style knockback profile
 disable_downward_kb: true
 horizontal:
   ground: 0.685
@@ -8,7 +8,8 @@ vertical:
   ground: 0.31075
   air: 0.3
   sprint_extra: 0.1
-hit_delay: 10
+hit_delay: 20
+hit_delay_format: nms_window
 y_limit: 3.1
 stop_sprint: true
 projectile:
@@ -16,7 +17,7 @@ projectile:
   horizontal: 0.24
   vertical: 0.2
   horizontal_multiplier: 0.9
-  vertical_multiplier: 0. 9
+  vertical_multiplier: 0.9
   direction_override: false
 hitbox:
   length: 0.7
@@ -40,9 +41,3 @@ packet:
 modern:
   cooldown_affects_kb: false
   entity_interaction_range: 3.0
-legacy:
-  combo_residual: true
-  #combo_residual
-  #只影响旧战斗命中的击退叠加，不影响伤害、无敌帧或普通 kit。
-  #开启后，玩家刚被旧剑击退时又立刻受击，新击退会带入上一段尚未消失的移动速度的一部分，因此连击会更有“击退传递感”，距离和连续性更接近低版本。
-  #关闭后，每一击按击退配置重新计算，不继承上一击剩余速度，连击更干净、独立。

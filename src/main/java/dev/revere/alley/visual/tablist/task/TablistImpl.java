@@ -18,11 +18,8 @@ import java.util.stream.Collectors;
 /**
  * TablistAdapter接口的实现类，负责构建和更新玩家的制表符列表页眉和页脚。
  * @author Emmy
- *         作者：Emmy
  * @project Alley
- *         项目：Alley
  * @date 07/09/2024 - 15:16
- *        日期：2024年9月7日 - 15:16
  */
 public class  TablistImpl implements TablistAdapter {
     protected final AlleyPlugin plugin;

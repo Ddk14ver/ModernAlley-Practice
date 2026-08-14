@@ -10,7 +10,12 @@ import dev.revere.alley.feature.title.model.TitleRecord;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
+import dev.revere.alley.library.command.annotation.CompleterData;
 import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author Alley
@@ -19,10 +24,42 @@ import org.bukkit.entity.Player;
  */
 public class TitleManagerCommand extends BaseCommand {
 
+    @CompleterData(name = "titlemanager")
+    public List<String> titleManagerCompleter(CommandArgs command) {
+        List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
+
+        if (!command.getSender().hasPermission(this.getAdminPermission())) {
+            return completion;
+        }
+
+        if (args.length == 1) {
+            completion.addAll(Arrays.asList("help", "create", "delete", "rename", "setprefix", "setrequired"));
+            return completion;
+        }
+
+        if (args.length == 2) {
+            String subCommand = args[0].toLowerCase();
+            if (subCommand.equals("delete") || subCommand.equals("rename")
+                    || subCommand.equals("setprefix") || subCommand.equals("setrequired")) {
+                this.plugin.getService(TitleService.class).getTitles().values()
+                        .forEach(title -> completion.add(title.getName()));
+            }
+            return completion;
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("setrequired")) {
+            this.plugin.getService(DivisionService.class).getDivisions()
+                    .forEach(division -> completion.add(division.getName()));
+        }
+
+        return completion;
+    }
+
     @CommandData(
             name = "titlemanager",
             isAdminOnly = true,
-            usage = "titlemanager <help|create|rename|setprefix>",
+            usage = "titlemanager <help|create|delete|rename|setprefix|setrequired>",
             description = "Manage all titles via GUI or subcommands."
     )
     @Override
@@ -40,6 +77,7 @@ public class TitleManagerCommand extends BaseCommand {
         switch (args[0].toLowerCase()) {
             case "help" -> sendHelp(player);
             case "create" -> handleCreate(player, args, titleService);
+            case "delete" -> handleDelete(player, args, titleService);
             case "rename" -> handleRename(player, args, titleService);
             case "setprefix" -> handleSetPrefix(player, args, titleService);
             case "setrequired" -> handleSetRequired(player, args, titleService);
@@ -68,6 +106,29 @@ public class TitleManagerCommand extends BaseCommand {
 
         titleService.createCustomTitle(name, prefix.toString().trim());
         player.sendMessage(CC.translate("&aCustom title '&6" + name + "&a' created with prefix: " + prefix.toString().trim()));
+    }
+
+    private void handleDelete(Player player, String[] args, TitleServiceImpl titleService) {
+        if (args.length < 2) {
+            player.sendMessage(CC.translate("&cUsage: /titlemanager delete <name>"));
+            return;
+        }
+
+        TitleRecord title = titleService.getTitle(args[1]);
+        if (title == null) {
+            player.sendMessage(CC.translate("&cTitle not found: " + args[1]));
+            return;
+        }
+
+        if (title.getKit() != null) {
+            player.sendMessage(CC.translate("&cThis is a system-generated title and cannot be deleted."));
+            player.sendMessage(CC.translate("&7Only custom titles (not tied to a kit) can be deleted."));
+            return;
+        }
+
+        String name = title.getName();
+        titleService.deleteTitle(title);
+        player.sendMessage(CC.translate("&aCustom title '&6" + name + "&a' has been deleted."));
     }
 
     private void handleRename(Player player, String[] args, TitleServiceImpl titleService) {
@@ -138,6 +199,7 @@ public class TitleManagerCommand extends BaseCommand {
         player.sendMessage(CC.translate(" &6│ &6/titlemanager &7| Open the GUI"));
         player.sendMessage(CC.translate(" &6│ &6/titlemanager help &7| Show this help"));
         player.sendMessage(CC.translate(" &6│ &6/titlemanager create <name> <prefix> &7| Create custom title"));
+        player.sendMessage(CC.translate(" &6│ &6/titlemanager delete <name> &7| Delete a custom title"));
         player.sendMessage(CC.translate(" &6│ &6/titlemanager rename <name> <newName> &7| Rename a title"));
         player.sendMessage(CC.translate(" &6│ &6/titlemanager setprefix <name> <prefix> &7| Set title prefix"));
         player.sendMessage(CC.translate(" &6│ &6/titlemanager setrequired <name> <div> &7| Set required division"));

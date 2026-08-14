@@ -16,7 +16,7 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.*;
 /**
- * @author Ddk1 ClaudeCode
+ * @author Ddk1
  * @project Alley
  * @since 13/07/2026
  *
@@ -55,7 +55,7 @@ public final class LayoutSelectionMenu extends Menu {
         while (slots.size() < ProfileLayoutData.MAX_LAYOUTS) slots.add(null);
 
         // Layout slot rows: 1, 2, 3, 4 (slots 11, 20, 29, 38)
-        int[] rowStarts = {11, 20, 29, 38};
+        int[] rowStarts = {10, 19, 28, 37};
         for (int i = 0; i < ProfileLayoutData.MAX_LAYOUTS; i++) {
             final int idx = i;
             final LayoutData layout = (i < slots.size()) ? slots.get(i) : null;
@@ -75,7 +75,7 @@ public final class LayoutSelectionMenu extends Menu {
             });
 
             // Sword (create/edit — enters Level 3)
-            buttons.put(base + 1, new Button() {
+            buttons.put(base + 2, new Button() {
                 @Override
                 public ItemStack getButtonItem(Player player) {
                     boolean created = layout != null;
@@ -94,6 +94,7 @@ public final class LayoutSelectionMenu extends Menu {
                         // Create new layout in this slot
                         LayoutData newLayout = new LayoutData("layout-" + (idx+1),
                                 "Layout " + (idx+1), kit.getItems());
+                        newLayout.setOffhand(kit.getOffhand());
                         profile.getProfileData().getLayoutData().setLayoutAt(kit.getName(), idx, newLayout);
                         new LayoutEditorMenu(kit, newLayout).openMenu(player);
                     } else {
@@ -105,7 +106,7 @@ public final class LayoutSelectionMenu extends Menu {
             // Only show book/sign/wool if layout exists
             if (layout != null) {
                 // Book (edit — same as sword for created layouts)
-                buttons.put(base + 2, new Button() {
+                buttons.put(base + 3, new Button() {
                     @Override
                     public ItemStack getButtonItem(Player player) {
                         return new ItemBuilder(Material.BOOK)
@@ -122,7 +123,7 @@ public final class LayoutSelectionMenu extends Menu {
                 });
 
                 // Sign (rename)
-                buttons.put(base + 3, new Button() {
+                buttons.put(base + 4, new Button() {
                     @Override
                     public ItemStack getButtonItem(Player player) {
                         return new ItemBuilder(Material.OAK_SIGN)
@@ -141,7 +142,7 @@ public final class LayoutSelectionMenu extends Menu {
                 });
 
                 // Red wool (delete)
-                buttons.put(base + 4, new Button() {
+                buttons.put(base + 6, new Button() {
                     @Override
                     public ItemStack getButtonItem(Player player) {
                         return new ItemBuilder(Material.RED_WOOL)

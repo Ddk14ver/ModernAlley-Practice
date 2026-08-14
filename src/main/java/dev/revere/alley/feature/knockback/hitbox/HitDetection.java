@@ -93,11 +93,17 @@ public class HitDetection implements Listener {
         Vector dir = eye.getDirection();
         Ray ray = new Ray(eye.toVector(), dir);
 
-        AABB expandedBox = AABB.fromSize(profile.getHitboxLength(), profile.getHitboxHeight());
+        double halfWidth = profile.getHitboxLength() / 2.0D;
+        double verticalExpansion = Math.max(0.0D, (profile.getHitboxHeight() - 1.8D) / 2.0D);
+        AABB expandedBox = new AABB(
+                new Vector(-halfWidth, -verticalExpansion, -halfWidth),
+                new Vector(halfWidth, profile.getHitboxHeight() - verticalExpansion, halfWidth));
         AABB vanillaBox = AABB.fromSize(0.6, 1.8); // vanilla 1.21 hitbox
-        double maxDist = 3.5;
+        double maxDist = Math.max(0.0D, Math.min(3.0D, profile.getEntityInteractionRange()));
+        if (maxDist == 0.0D) return;
 
         Player closest = null;
+        double closestDistance = maxDist;
         boolean alreadyHitByVanilla = false;
 
         for (Entity entity : attacker.getNearbyEntities(maxDist + 2, maxDist + 2, maxDist + 2)) {
@@ -113,7 +119,10 @@ public class HitDetection implements Listener {
                     break;
                 }
                 double d = eye.toVector().distance(hit);
-                if (d < 3.5 && closest == null) { closest = victim; }
+                if (d <= closestDistance) {
+                    closest = victim;
+                    closestDistance = d;
+                }
             }
         }
 

@@ -7,6 +7,7 @@ import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.visual.scoreboard.internal.match.BaseMatchScoreboard;
+import dev.revere.alley.visual.scoreboard.internal.match.MatchScoreboardSettings;
 import dev.revere.alley.visual.scoreboard.internal.match.annotation.ScoreboardData;
 import dev.revere.alley.common.time.TimeUtil;
 import org.bukkit.entity.Player;
@@ -48,6 +49,9 @@ public class MatchScoreboardHideAndSeek extends BaseMatchScoreboard {
         List<String> scoreboardLines = new ArrayList<>();
 
         for (String line : template) {
+            if (!MatchScoreboardSettings.shouldDisplay(profile, line)) {
+                continue;
+            }
             scoreboardLines.add(replacePlaceholders(line, profile, player, you, opponent));
         }
 

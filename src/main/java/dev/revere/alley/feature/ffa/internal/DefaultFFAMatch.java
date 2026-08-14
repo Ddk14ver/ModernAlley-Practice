@@ -13,6 +13,8 @@ import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.data.types.ProfileFFAData;
 import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.challenge.ChallengeService;
+import dev.revere.alley.feature.challenge.ChallengeType;
 import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.cooldown.Cooldown;
 import dev.revere.alley.feature.cooldown.CooldownService;
@@ -22,6 +24,8 @@ import dev.revere.alley.feature.ffa.FFAState;
 import dev.revere.alley.feature.ffa.model.GameFFAPlayer;
 import dev.revere.alley.feature.hotbar.HotbarService;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.match.MatchService;
+import dev.revere.alley.feature.match.internal.MatchServiceImpl;
 import dev.revere.alley.feature.spawn.SpawnService;
 import dev.revere.alley.feature.visibility.VisibilityService;
 import org.bukkit.Bukkit;
@@ -36,6 +40,22 @@ import java.util.List;
  */
 public class DefaultFFAMatch extends FFAMatch {
     protected final AlleyPlugin plugin = AlleyPlugin.getInstance();
+
+    private void applyLegacyCombat(Player player) {
+        MatchService matchService = this.plugin.getService(MatchService.class);
+        if (matchService instanceof MatchServiceImpl matchServiceImpl
+                && matchServiceImpl.getLegacyCombatService() != null) {
+            matchServiceImpl.getLegacyCombatService().applyKit(player, this.getKit());
+        }
+    }
+
+    private void removeLegacyCombat(Player player) {
+        MatchService matchService = this.plugin.getService(MatchService.class);
+        if (matchService instanceof MatchServiceImpl matchServiceImpl
+                && matchServiceImpl.getLegacyCombatService() != null) {
+            matchServiceImpl.getLegacyCombatService().removeAll(player);
+        }
+    }
 
     /**
      * Constructor for the DefaultFFAMatchImpl class.
@@ -147,6 +167,7 @@ public class DefaultFFAMatch extends FFAMatch {
 
         this.plugin.getService(VisibilityService.class).updateVisibility(player);
 
+        this.removeLegacyCombat(player);
         PlayerUtil.reset(player, false, true);
         this.plugin.getService(KnockbackManager.class).clearKnockback(player);
         this.plugin.getService(SpawnService.class).teleportToSpawn(player);
@@ -181,6 +202,7 @@ public class DefaultFFAMatch extends FFAMatch {
         Kit kit = this.getKit();
         player.getInventory().setArmorContents(kit.getArmor());
         player.getInventory().setContents(kit.getItems());
+        this.applyLegacyCombat(player);
     }
 
     /**
@@ -199,13 +221,18 @@ public class DefaultFFAMatch extends FFAMatch {
         Arena arena = this.getArena();
 
         Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
+            Profile currentProfile = profileService.getProfile(player.getUniqueId());
+            if (!player.isOnline() || currentProfile == null
+                    || currentProfile.getFfaMatch() != this) return;
             player.teleport(arena.getPos1());
+            this.plugin.getService(KnockbackManager.class).resetHitDelayState(player);
 
             Kit kit = this.getKit();
             player.getInventory().clear();
             player.getInventory().setArmorContents(kit.getArmor());
             player.getInventory().setContents(kit.getItems());
             player.updateInventory();
+            this.applyLegacyCombat(player);
         }, 1L);
 
         GameFFAPlayer gameFFAPlayer = this.getGameFFAPlayer(player);
@@ -253,6 +280,8 @@ public class DefaultFFAMatch extends FFAMatch {
         if (killerFfaData != null) {
             killerFfaData.incrementKills();
             killerFfaData.incrementKillstreak();
+            AlleyPlugin.getInstance().getService(ChallengeService.class)
+                    .recordProgress(killerProfile, ChallengeType.KILLS, 1);
         }
 
         AlleyPlugin.getInstance().getService(dev.revere.alley.feature.coin.CoinRewardService.class).rewardFFAKill(killer);

@@ -4,6 +4,7 @@ import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldOffhand;
 import dev.revere.alley.feature.layout.data.LayoutData;
 import dev.revere.alley.feature.layout.menu.button.editor.LayoutCancelButton;
 import dev.revere.alley.feature.layout.menu.button.editor.LayoutDeleteButton;
@@ -50,6 +51,16 @@ public class LayoutEditorMenu extends Menu {
     public void onOpen(Player player) {
         AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId()).setState(ProfileState.EDITING);
         player.getInventory().setContents(this.layout.getItems());
+        if (!this.kit.isSettingEnabled(KitSettingOldOffhand.class)) {
+            // Slot 35 is the freely-editable offhand slot in this editor.
+            ItemStack offhand = this.layout.getOffhand() != null ? this.layout.getOffhand() : this.kit.getOffhand();
+            player.getOpenInventory().getTopInventory().setItem(35, offhand);
+        }
+    }
+
+    @Override
+    public boolean isEditableSlot(int slot) {
+        return slot == 35;
     }
 
     @Override
@@ -76,6 +87,11 @@ public class LayoutEditorMenu extends Menu {
         this.addExtraItems(buttons);
         this.addExtraItemsBorder(buttons);
         this.addGlass(buttons, Material.BLACK_STAINED_GLASS_PANE);
+
+        // Slot 35 is the freely-editable offhand slot (only for non-oldoffhand kits).
+        if (!this.kit.isSettingEnabled(KitSettingOldOffhand.class)) {
+            buttons.remove(35);
+        }
 
         return buttons;
     }

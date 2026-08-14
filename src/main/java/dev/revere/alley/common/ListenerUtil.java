@@ -113,7 +113,7 @@ public class ListenerUtil {
                 block.setType(Material.AIR);
             }
         }
-        player.teleport(spawnLocation);
+        player.teleportAsync(spawnLocation);
     }
 
     /**

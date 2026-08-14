@@ -2,10 +2,10 @@ package dev.revere.alley.feature.match.combat.legacy;
 
 import com.destroystokyo.paper.event.entity.ProjectileCollideEvent;
 import com.destroystokyo.paper.event.player.PlayerLaunchProjectileEvent;
+import io.papermc.paper.event.player.PlayerStopUsingItemEvent;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import org.bukkit.*;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
@@ -40,6 +40,13 @@ import java.util.concurrent.ThreadLocalRandom;
  * Implements all 1.8 legacy PVP mechanics, organized by KitSetting module.
  */
 public class LegacyCombatListener implements Listener {
+
+    private static final EntityDamageEvent.DamageModifier[] PRE_ARMOUR_MODIFIERS = {
+            EntityDamageEvent.DamageModifier.INVULNERABILITY_REDUCTION,
+            EntityDamageEvent.DamageModifier.FREEZING,
+            EntityDamageEvent.DamageModifier.HARD_HAT,
+            EntityDamageEvent.DamageModifier.BLOCKING
+    };
 
     private final LegacyCombatService svc;
     private final LegacyProjectileCollisionTracker projectileCollisionTracker;
@@ -82,6 +89,10 @@ public class LegacyCombatListener implements Listener {
     public void onSwap(PlayerSwapHandItemsEvent e) { svc.setBlocking(e.getPlayer().getUniqueId(), false); }
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDrop(PlayerDropItemEvent e) { svc.setBlocking(e.getPlayer().getUniqueId(), false); }
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onStopUsingItem(PlayerStopUsingItemEvent e) {
+        svc.setBlocking(e.getPlayer().getUniqueId(), false);
+    }
 
     // --- Apply blocks_attacks when switching to sword ---
 
@@ -93,10 +104,10 @@ public class LegacyCombatListener implements Listener {
 
     // --- Shield damage reduction (sword block → 50%) ---
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onBlockReduction(EntityDamageByEntityEvent e) {
         if (!(e.getEntity() instanceof Player victim)) return;
-        if (!(e.getDamager() instanceof LivingEntity)) return;
+        if (!isLegacyBlockableDamage(e)) return;
         if (!svc.isBlocking(victim.getUniqueId())) return;
         if (!victim.isBlocking()) { svc.setBlocking(victim.getUniqueId(), false); return; }
         ItemStack main = victim.getInventory().getItemInMainHand();
@@ -122,6 +133,16 @@ public class LegacyCombatListener implements Listener {
         victim.getWorld().playSound(victim.getLocation(), Sound.ITEM_SHIELD_BLOCK, 1.0f, 0.8f);
     }
 
+    private boolean isLegacyBlockableDamage(EntityDamageByEntityEvent event) {
+        if (event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK) return true;
+        if (!(event.getDamager() instanceof Projectile projectile)) return false;
+
+        // 1.8 indirect magic damage bypasses blocking; ordinary arrows,
+        // fireballs, snowballs, eggs and similar projectile sources do not.
+        return !(projectile instanceof ThrownPotion)
+                && !(projectile instanceof ThrownExpBottle);
+    }
+
     // --- Old tool damage (1.8 sword/axe base) — same logic for both, no per-weapon difference ---
 
     // LOWEST priority: enforce hit delay + set 1.8 base damage BEFORE armour calc
@@ -129,17 +150,20 @@ public class LegacyCombatListener implements Listener {
     public void onToolDamage(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof Player attacker)) return;
         if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
+        if (isSyntheticLegacyRodHit(e)) return;
 
         UUID u = attacker.getUniqueId();
-        boolean legacyToolDamage = svc.hasOldEnchants(u);
-        boolean legacyPotionValues = svc.hasOldFood(u);
+        boolean legacyToolDamage = svc.hasSwordBlockKB(u) || svc.hasOldEnchants(u);
+        boolean legacyPotionValues = svc.hasSwordBlockKB(u);
         if (!legacyToolDamage && !legacyPotionValues) return;
 
         ItemStack weapon = attacker.getInventory().getItemInMainHand();
         Double legacyBase = legacyToolDamage ? toolDamage(weapon.getType()) : null;
         if (legacyBase == null && !legacyPotionValues) return;
 
-        boolean legacyCrit = svc.hasSwordBlockKB(u) && isLegacyCritical(attacker);
+        boolean legacyCrit = e.getEntity() instanceof LivingEntity
+                && svc.hasSwordBlockKB(u)
+                && isLegacyCritical(attacker);
         boolean vanillaCrit = legacyCrit && hasVanillaCritical(attacker);
         double base = legacyBase != null
                 ? legacyBase
@@ -153,7 +177,7 @@ public class LegacyCombatListener implements Listener {
             base *= 1.5;
         }
 
-        if (legacyBase != null) {
+        if (legacyBase != null && svc.hasOldEnchants(u)) {
             base += weapon.getEnchantmentLevel(Enchantment.SHARPNESS) * 1.25;
         }
         e.setDamage(EntityDamageEvent.DamageModifier.BASE, Math.max(0.0, base));
@@ -164,17 +188,28 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onCrit(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof Player attacker)) return;
+        if (!(e.getEntity() instanceof LivingEntity)) return;
         if (!svc.hasSwordBlockKB(attacker.getUniqueId())) return;
+        if (isSyntheticLegacyRodHit(e)) return;
         if (!isLegacyCritical(attacker)) return;
 
         ItemStack weapon = attacker.getInventory().getItemInMainHand();
-        boolean composedByToolDamage = svc.hasOldFood(attacker.getUniqueId())
-                || (svc.hasOldEnchants(attacker.getUniqueId()) && toolDamage(weapon.getType()) != null);
+        UUID attackerId = attacker.getUniqueId();
+        boolean composedByToolDamage = svc.hasSwordBlockKB(attackerId)
+                || ((svc.hasSwordBlockKB(attackerId) || svc.hasOldEnchants(attackerId))
+                && toolDamage(weapon.getType()) != null);
         if (!composedByToolDamage && !hasVanillaCritical(attacker)) {
             double damage = e.getDamage(EntityDamageEvent.DamageModifier.BASE) * 1.5;
             e.setDamage(EntityDamageEvent.DamageModifier.BASE, Math.max(0.0, damage));
         }
-        attacker.getWorld().spawnParticle(Particle.CRIT, attacker.getLocation().add(0, 1, 0), 5, 0.2, 0.2, 0.2, 0);
+        if (!isLegacyDamageSupplement(e)) {
+            attacker.getWorld().spawnParticle(Particle.CRIT,
+                    attacker.getLocation().add(0, 1, 0), 5, 0.2, 0.2, 0.2, 0);
+        }
+    }
+
+    private boolean isSyntheticLegacyRodHit(EntityDamageByEntityEvent event) {
+        return event.getEntity().getScoreboardTags().contains("alley_legacy_rod_kb");
     }
 
     private boolean isLegacyCritical(Player attacker) {
@@ -188,6 +223,29 @@ public class LegacyCombatListener implements Listener {
 
     private boolean hasVanillaCritical(Player attacker) {
         return !attacker.isSprinting() && attacker.getAttackCooldown() > 0.9f;
+    }
+
+    // 1.8 briefly ignites a non-burning target before damage is accepted. The
+    // modern Fire Aspect effect still supplies the successful 4 seconds/level.
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onLegacyFireAspectPreIgnite(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player attacker)) return;
+        if (!(event.getEntity() instanceof LivingEntity victim)) return;
+        if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
+        if (!svc.hasSwordBlockKB(attacker.getUniqueId()) || isSyntheticLegacyRodHit(event)) return;
+
+        int fireAspect = attacker.getInventory().getItemInMainHand()
+                .getEnchantmentLevel(Enchantment.FIRE_ASPECT);
+        if (fireAspect <= 0 || victim.getFireTicks() > 0) return;
+
+        victim.setFireTicks(20);
+        Bukkit.getScheduler().runTask(plugin(), () -> {
+            // A successful modern Fire Aspect application is at least 4 seconds;
+            // a rejected 1.8 attack must undo only this temporary one-second fire.
+            if (event.isCancelled() || victim.getFireTicks() <= 20) {
+                victim.setFireTicks(0);
+            }
+        });
     }
 
     // --- Sword sweep removal ---
@@ -229,7 +287,7 @@ public class LegacyCombatListener implements Listener {
         ItemStack bow = e.getBow();
         int punchLevel = bow == null ? 0 : bow.getEnchantmentLevel(Enchantment.PUNCH);
         int powerLevel = bow == null ? 0 : bow.getEnchantmentLevel(Enchantment.POWER);
-        LegacyProjectileData.markArrow(arrow, punchLevel, powerLevel, e.getForce());
+        LegacyProjectileData.markArrow(arrow, punchLevel, powerLevel);
         this.projectileCollisionTracker.track(arrow, player);
     }
 
@@ -277,18 +335,43 @@ public class LegacyCombatListener implements Listener {
         if (!(event.getEntity() instanceof EnderPearl pearl)) return;
         if (!(event.getHitEntity() instanceof Player victim)) return;
         if (!(pearl.getShooter() instanceof Player attacker) || attacker.equals(victim)) return;
-        if (!LegacyProjectileData.isMarked(pearl) || !svc.hasSwordBlockKB(attacker.getUniqueId())) return;
+        if (!LegacyProjectileData.isMarked(pearl)
+                || !svc.hasSwordBlockKB(attacker.getUniqueId())
+                || !svc.hasSwordBlockKB(victim.getUniqueId())) return;
+        if (victim.isDead() || victim.getGameMode() == GameMode.SPECTATOR) return;
+
+        KnockbackManager knockbackManager = plugin().getService(KnockbackManager.class);
+        // This path has to reset Bukkit's counter briefly in order to probe NMS
+        // for the synthetic pearl hit. Never use that reset to bypass an already
+        // active hurt window: a pearl is a tiny damage probe, so ordinary/fire ->
+        // pearl must be rejected before the probe starts. The reverse direction
+        // (pearl/rod -> a larger melee hit) is left to NMS's damage-delta branch.
+        if (knockbackManager.isInsideHurtResistanceWindow(victim)
+                || knockbackManager.wasInsideHurtResistanceWindow(victim)) return;
 
         UUID victimId = victim.getUniqueId();
+        Vector impactVelocity = pearl.getVelocity().clone();
+        int previousNoDamageTicks = victim.getNoDamageTicks();
+        boolean accepted = false;
         pendingPearlDamageVictims.add(victimId);
         acceptedPearlDamageEvents.remove(victimId);
+        knockbackManager.getPlayerData(victim).setSuppressLegacyPearlVelocity(true);
+        victim.setNoDamageTicks(0);
         try {
             victim.damage(0.001, pearl);
             EntityDamageEvent acceptedDamage = acceptedPearlDamageEvents.remove(victimId);
             if (acceptedDamage != null && !acceptedDamage.isCancelled()) {
-                plugin().getService(KnockbackManager.class).applyLegacyPearlKnockback(attacker, victim);
+                accepted = true;
+                knockbackManager.applyHitDelayWindow(victim);
+                victim.setNoDamageTicks(victim.getMaximumNoDamageTicks());
+                victim.playHurtAnimation(0.0F);
+                knockbackManager.applyLegacyPearlKnockback(attacker, victim, impactVelocity);
             }
         } finally {
+            knockbackManager.getPlayerData(victim).setSuppressLegacyPearlVelocity(false);
+            if (!accepted) {
+                victim.setNoDamageTicks(previousNoDamageTicks);
+            }
             pendingPearlDamageVictims.remove(victimId);
             acceptedPearlDamageEvents.remove(victimId);
         }
@@ -301,7 +384,8 @@ public class LegacyCombatListener implements Listener {
         if (!(damager instanceof Projectile projectile) || !LegacyProjectileData.isMarked(projectile)) return;
         ProjectileSource shooter = projectile.getShooter();
         if (!(shooter instanceof Player attacker)) return;
-        if (!svc.hasSwordBlockKB(attacker.getUniqueId())) return;
+        if (!svc.hasSwordBlockKB(attacker.getUniqueId())
+                || !svc.hasSwordBlockKB(victim.getUniqueId())) return;
 
         EntityType type = damager.getType();
         if (type == EntityType.SNOWBALL || type == EntityType.EGG || type == EntityType.ENDER_PEARL) {
@@ -313,13 +397,22 @@ public class LegacyCombatListener implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onLegacyPearlDamageAccepted(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player victim)) return;
         UUID victimId = victim.getUniqueId();
         if (pendingPearlDamageVictims.contains(victimId)) {
+            event.setDamage(0.0);
             acceptedPearlDamageEvents.put(victimId, event);
         }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onLegacyPearlTeleport(PlayerTeleportEvent event) {
+        if (event.getCause() != PlayerTeleportEvent.TeleportCause.ENDER_PEARL
+                || !svc.hasSwordBlockKB(event.getPlayer().getUniqueId())) return;
+
+        svc.suppressPearlTeleportSound(event.getFrom(), event.getTo());
     }
 
     // --- Fishing rod launch velocity (1.7/1.8) ---
@@ -388,6 +481,10 @@ public class LegacyCombatListener implements Listener {
     private void applyFishingRodHit(FishHook hook, Player attacker, Entity hitEntity) {
         if (!(hitEntity instanceof LivingEntity victim)) return;
         if (hitEntity.equals(attacker)) return;
+        if (victim instanceof Player target) {
+            if (target.isDead() || target.getGameMode() == GameMode.SPECTATOR
+                    || !svc.hasSwordBlockKB(target.getUniqueId())) return;
+        }
         if (hook.getScoreboardTags().contains("alley_rod_hit_applied")) return;
         hook.addScoreboardTag("alley_rod_hit_applied");
 
@@ -459,7 +556,7 @@ public class LegacyCombatListener implements Listener {
     //  oldFood — player regen, golden apple, potion effects, run-eating
     // ================================================================
 
-    // --- 1.8 Player regen — throttle SATURATION (4s) and NATURAL (8s) ---
+    // --- 1.8 natural regeneration: food >= 18, 1 health every 80 ticks ---
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onRegen(EntityRegainHealthEvent e) {
@@ -467,21 +564,13 @@ public class LegacyCombatListener implements Listener {
         Player p = (Player) e.getEntity();
         if (!svc.hasOldFood(p.getUniqueId())) return;
 
-        UUID id = p.getUniqueId();
-        long now = svc.tickCounter;
         EntityRegainHealthEvent.RegainReason reason = e.getRegainReason();
-
-        if (reason == EntityRegainHealthEvent.RegainReason.SATIATED) {
-            // Fast regen (saturation): throttle to 1 HP every 80 ticks (4s)
-            Long last = svc.lastSaturationHeal.get(id);
-            if (last != null && now - last < 80) { e.setCancelled(true); return; }
-            svc.lastSaturationHeal.put(id, now);
-            e.setAmount(1.0); // 1 HP per heal
-        } else if (reason == EntityRegainHealthEvent.RegainReason.REGEN) {
-            // Slow regen (natural, food ≥ 18): throttle to 1 HP every 160 ticks (8s)
-            Long last = svc.lastNaturalHeal.get(id);
-            if (last != null && now - last < 160) { e.setCancelled(true); return; }
-            svc.lastNaturalHeal.put(id, now);
+        if (reason == EntityRegainHealthEvent.RegainReason.SATIATED
+                || reason == EntityRegainHealthEvent.RegainReason.REGEN) {
+            if (!svc.isApplyingNaturalHeal(p.getUniqueId())) {
+                e.setCancelled(true);
+                return;
+            }
             e.setAmount(1.0);
         }
     }
@@ -499,7 +588,7 @@ public class LegacyCombatListener implements Listener {
             p.addPotionEffect(new PotionEffect(PotionEffectType.ABSORPTION, 2400, 0), true);
             p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 100, 1), true);
             p.setFoodLevel(Math.min(20, p.getFoodLevel() + 4));
-            p.setSaturation(Math.min(20, p.getSaturation() + 9.6f));
+            p.setSaturation(Math.min(p.getFoodLevel(), p.getSaturation() + 9.6f));
         } else if (mat == Material.ENCHANTED_GOLDEN_APPLE) {
             e.setCancelled(true);
             consumeOne(p, e.getHand());
@@ -508,7 +597,7 @@ public class LegacyCombatListener implements Listener {
             p.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE, 6000, 0), true);
             p.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 6000, 0), true);
             p.setFoodLevel(Math.min(20, p.getFoodLevel() + 4));
-            p.setSaturation(Math.min(20, p.getSaturation() + 9.6f));
+            p.setSaturation(Math.min(p.getFoodLevel(), p.getSaturation() + 9.6f));
         }
     }
 
@@ -537,8 +626,17 @@ public class LegacyCombatListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onLegacyExhaustion(EntityExhaustionEvent e) {
         if (!(e.getEntity() instanceof Player player)) return;
+        if (e.getExhaustionReason() == EntityExhaustionEvent.ExhaustionReason.ATTACK
+                && svc.hasSwordBlockKB(player.getUniqueId())) {
+            e.setExhaustion(0.3F);
+            return;
+        }
         if (!svc.hasOldFood(player.getUniqueId())) return;
-        e.setExhaustion(e.getExhaustion() * 0.7F);
+        switch (e.getExhaustionReason()) {
+            case REGEN -> e.setExhaustion(0.0F);
+            case JUMP -> e.setExhaustion(0.2F);
+            case JUMP_SPRINT -> e.setExhaustion(0.8F);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -602,6 +700,7 @@ public class LegacyCombatListener implements Listener {
     public void onOldSound(EntityDamageByEntityEvent e) {
         if (!(e.getEntity() instanceof Player p)) return;
         if (!svc.hasOldOffhand(p.getUniqueId())) return;
+        if (isLegacyDamageSupplement(e)) return;
         p.getWorld().playSound(p.getLocation(), Sound.ENTITY_PLAYER_HURT, 1.0f, 1.0f);
     }
 
@@ -614,36 +713,39 @@ public class LegacyCombatListener implements Listener {
     // Run AFTER onToolDamage (LOWEST) so corrected 1.8 base damage is used
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onArmourStrength(EntityDamageEvent e) {
-        if (!(e.getEntity() instanceof LivingEntity entity)) return;
-        if (!(entity instanceof Player p)) return;
+        if (!(e.getEntity() instanceof Player p)) return;
         if (!svc.hasOldEnchants(p.getUniqueId())) return;
 
-        Map<EntityDamageEvent.DamageModifier, Double> mods = new EnumMap<>(EntityDamageEvent.DamageModifier.class);
-        for (EntityDamageEvent.DamageModifier m : EntityDamageEvent.DamageModifier.values()) {
-            if (e.isApplicable(m)) mods.put(m, e.getDamage(m));
+        double damage = damageBeforeArmour(e);
+        if (damage <= 0.0D) return;
+
+        // 1.8 applies a fixed 4% reduction per armour point. Damage strength and
+        // ARMOR_TOUGHNESS never participate in this calculation.
+        if (e.isApplicable(EntityDamageEvent.DamageModifier.ARMOR)) {
+            double afterArmour = damage * (25.0D - Math.min(20.0D, armourPoints(p))) / 25.0D;
+            e.setDamage(EntityDamageEvent.DamageModifier.ARMOR, afterArmour - damage);
+            damage = afterArmour;
         }
 
-        double base = mods.getOrDefault(EntityDamageEvent.DamageModifier.BASE, 0.0);
-        double blocking = mods.getOrDefault(EntityDamageEvent.DamageModifier.BLOCKING, 0.0);
-        double attackDmg = base + blocking + mods.getOrDefault(EntityDamageEvent.DamageModifier.HARD_HAT, 0.0);
-        if (attackDmg <= 0) return;
-
-        double points = armourPoints(p);
-
-        // 1.8 Protection EPF: 1 per level (4% per level per piece)
-        double protEpf = 0;
-        for (ItemStack a : p.getInventory().getArmorContents()) {
-            if (a != null && a.containsEnchantment(Enchantment.PROTECTION))
-                protEpf += a.getEnchantmentLevel(Enchantment.PROTECTION);
+        // Resistance is between armour and enchantments in EntityLivingBase.
+        if (e.isApplicable(EntityDamageEvent.DamageModifier.RESISTANCE)) {
+            double afterResistance = applyLegacyResistance(p, e, damage);
+            e.setDamage(EntityDamageEvent.DamageModifier.RESISTANCE, afterResistance - damage);
+            damage = afterResistance;
         }
 
-        // 1.8: armor + protection are COMBINED and capped at 80% — NOT multiplied
-        double totalReduction = Math.min(20, points + protEpf) / 25.0;
-        double armourReduction = attackDmg * totalReduction;
-        mods.put(EntityDamageEvent.DamageModifier.ARMOR, -armourReduction);
-        mods.put(EntityDamageEvent.DamageModifier.MAGIC, 0.0);
+        if (e.isApplicable(EntityDamageEvent.DamageModifier.MAGIC)) {
+            int protection = legacyProtectionFactor(p, e);
+            double afterProtection = damage * (25.0D - protection) / 25.0D;
+            e.setDamage(EntityDamageEvent.DamageModifier.MAGIC, afterProtection - damage);
+            damage = afterProtection;
+        }
 
-        mods.forEach(e::setDamage);
+        // Modifier changes do not recalculate Bukkit's cached absorption value.
+        if (e.isApplicable(EntityDamageEvent.DamageModifier.ABSORPTION)) {
+            e.setDamage(EntityDamageEvent.DamageModifier.ABSORPTION,
+                    -Math.min(damage, p.getAbsorptionAmount()));
+        }
     }
 
     // --- Armour durability (full-block prevents armour damage, 1.8 style) ---
@@ -667,6 +769,13 @@ public class LegacyCombatListener implements Listener {
 
     private AlleyPlugin plugin() { return AlleyPlugin.getInstance(); }
 
+    private boolean isLegacyDamageSupplement(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) return false;
+        if (!svc.hasSwordBlockKB(victim.getUniqueId())) return false;
+        return plugin().getService(KnockbackManager.class)
+                .wasInsideHurtResistanceWindow(victim);
+    }
+
     private boolean isSword(Material t) { return t.name().endsWith("_SWORD"); }
     private boolean isAxe(Material t) { return t.name().endsWith("_AXE"); }
 
@@ -688,10 +797,13 @@ public class LegacyCombatListener implements Listener {
     };}
 
     private Double toolDamage(Material type) {
-        if (isSword(type)) return swordDmg(type);
-        if (isAxe(type)) return axeDmg(type);
-        if (type.name().endsWith("_PICKAXE")) return pickaxeDmg(type);
-        if (type.name().endsWith("_SHOVEL")) return shovelDmg(type);
+        // EntityPlayer contributes 1 base damage before the held item's
+        // attribute modifier in 1.8.
+        if (isSword(type)) return 1.0 + swordDmg(type);
+        if (isAxe(type)) return 1.0 + axeDmg(type);
+        if (type.name().endsWith("_PICKAXE")) return 1.0 + pickaxeDmg(type);
+        if (type.name().endsWith("_SHOVEL")) return 1.0 + shovelDmg(type);
+        if (type.name().endsWith("_HOE")) return 1.0;
         return null;
     }
 
@@ -704,11 +816,11 @@ public class LegacyCombatListener implements Listener {
     }
 
     private double applyLegacyPotionValues(Player attacker, double base) {
-        if (!svc.hasOldFood(attacker.getUniqueId())) return base;
+        if (!svc.hasSwordBlockKB(attacker.getUniqueId())) return base;
         int strength = potionAmplifier(attacker, PotionEffectType.STRENGTH);
         int weakness = potionAmplifier(attacker, PotionEffectType.WEAKNESS);
-        if (strength >= 0) base *= 1.0 + 2.5 * (strength + 1);
-        if (weakness >= 0) base -= 2.0 * (weakness + 1);
+        if (weakness >= 0) base -= 0.5 * (weakness + 1);
+        if (strength >= 0) base *= 1.0 + 1.3 * (strength + 1);
         return Math.max(0.0, base);
     }
 
@@ -799,17 +911,99 @@ public class LegacyCombatListener implements Listener {
                 && view.convertSlot(rawSlot) == 40;
     }
 
+    private double damageBeforeArmour(EntityDamageEvent event) {
+        double damage = event.getDamage(EntityDamageEvent.DamageModifier.BASE);
+        for (EntityDamageEvent.DamageModifier modifier : PRE_ARMOUR_MODIFIERS) {
+            if (event.isApplicable(modifier)) damage += event.getDamage(modifier);
+        }
+        return Math.max(0.0D, damage);
+    }
+
+    private double applyLegacyResistance(Player player, EntityDamageEvent event, double damage) {
+        if (event.getCause() == EntityDamageEvent.DamageCause.VOID
+                || event.getCause() == EntityDamageEvent.DamageCause.KILL
+                || event.getCause() == EntityDamageEvent.DamageCause.STARVATION) {
+            return damage;
+        }
+
+        PotionEffect resistance = player.getPotionEffect(PotionEffectType.RESISTANCE);
+        if (resistance == null) return damage;
+
+        int reduction = (resistance.getAmplifier() + 1) * 5;
+        return Math.max(0.0D, damage * (25.0D - reduction) / 25.0D);
+    }
+
+    private int legacyProtectionFactor(Player player, EntityDamageEvent event) {
+        if (event.getCause() == EntityDamageEvent.DamageCause.VOID
+                || event.getCause() == EntityDamageEvent.DamageCause.KILL
+                || event.getCause() == EntityDamageEvent.DamageCause.STARVATION) {
+            return 0;
+        }
+
+        int rawProtection = 0;
+        for (ItemStack armour : player.getInventory().getArmorContents()) {
+            if (armour == null || armour.getType().isAir()) continue;
+
+            rawProtection += legacyProtectionValue(
+                    armour.getEnchantmentLevel(Enchantment.PROTECTION), 0.75D);
+            if (isFireDamage(event)) {
+                rawProtection += legacyProtectionValue(
+                        armour.getEnchantmentLevel(Enchantment.FIRE_PROTECTION), 1.25D);
+            }
+            if (event.getCause() == EntityDamageEvent.DamageCause.FALL) {
+                rawProtection += legacyProtectionValue(
+                        armour.getEnchantmentLevel(Enchantment.FEATHER_FALLING), 2.5D);
+            }
+            if (isExplosionDamage(event)) {
+                rawProtection += legacyProtectionValue(
+                        armour.getEnchantmentLevel(Enchantment.BLAST_PROTECTION), 1.5D);
+            }
+            if (event.getCause() == EntityDamageEvent.DamageCause.PROJECTILE) {
+                rawProtection += legacyProtectionValue(
+                        armour.getEnchantmentLevel(Enchantment.PROJECTILE_PROTECTION), 1.5D);
+            }
+        }
+
+        int capped = Math.max(0, Math.min(25, rawProtection));
+        if (capped == 0) return 0;
+
+        int randomized = ((capped + 1) >> 1)
+                + ThreadLocalRandom.current().nextInt((capped >> 1) + 1);
+        return Math.min(20, randomized);
+    }
+
+    private int legacyProtectionValue(int level, double typeMultiplier) {
+        if (level <= 0) return 0;
+        double base = (6.0D + (double) level * level) / 3.0D;
+        return (int) Math.floor(base * typeMultiplier);
+    }
+
+    private boolean isFireDamage(EntityDamageEvent event) {
+        return switch (event.getCause()) {
+            case FIRE, FIRE_TICK, LAVA, HOT_FLOOR, CAMPFIRE, MELTING -> true;
+            default -> false;
+        };
+    }
+
+    private boolean isExplosionDamage(EntityDamageEvent event) {
+        return event.getCause() == EntityDamageEvent.DamageCause.BLOCK_EXPLOSION
+                || event.getCause() == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION;
+    }
+
     private double armourPoints(Player p) {
         double pts = 0;
         for (ItemStack a : p.getInventory().getArmorContents()) {
             if (a == null) continue;
             pts += switch (a.getType()) {
-                case LEATHER_HELMET,LEATHER_BOOTS,GOLDEN_HELMET,GOLDEN_BOOTS,CHAINMAIL_HELMET,CHAINMAIL_BOOTS->1;
-                case LEATHER_LEGGINGS,GOLDEN_LEGGINGS,CHAINMAIL_LEGGINGS->2;
-                case LEATHER_CHESTPLATE,GOLDEN_CHESTPLATE,CHAINMAIL_CHESTPLATE->3;
-                case IRON_HELMET,IRON_BOOTS,TURTLE_HELMET->2; case IRON_LEGGINGS->5; case IRON_CHESTPLATE->6;
-                case DIAMOND_HELMET,DIAMOND_BOOTS,NETHERITE_HELMET,NETHERITE_BOOTS->3;
-                case DIAMOND_LEGGINGS,NETHERITE_LEGGINGS->6; case DIAMOND_CHESTPLATE,NETHERITE_CHESTPLATE->8;
+                case LEATHER_HELMET, LEATHER_BOOTS, GOLDEN_BOOTS, CHAINMAIL_BOOTS -> 1;
+                case LEATHER_LEGGINGS, GOLDEN_HELMET, CHAINMAIL_HELMET,
+                        IRON_HELMET, IRON_BOOTS, TURTLE_HELMET -> 2;
+                case LEATHER_CHESTPLATE, GOLDEN_LEGGINGS, DIAMOND_HELMET,
+                        DIAMOND_BOOTS, NETHERITE_HELMET, NETHERITE_BOOTS -> 3;
+                case CHAINMAIL_LEGGINGS -> 4;
+                case GOLDEN_CHESTPLATE, CHAINMAIL_CHESTPLATE, IRON_LEGGINGS -> 5;
+                case IRON_CHESTPLATE, DIAMOND_LEGGINGS, NETHERITE_LEGGINGS -> 6;
+                case DIAMOND_CHESTPLATE, NETHERITE_CHESTPLATE -> 8;
                 default -> 0;
             };
         }

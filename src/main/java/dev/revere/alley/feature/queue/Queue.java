@@ -10,7 +10,6 @@ import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.hotbar.HotbarService;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.match.MatchService;
-import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.party.Party;
 import dev.revere.alley.feature.party.PartyService;
 import lombok.Getter;
@@ -191,46 +190,6 @@ public class Queue {
         }
 
         hotbarService.applyHotbarItems(player);
-    }
-
-    public boolean reserveAfterMatch(Player player, int elo) {
-        if (this.ranked || this.duos || player == null) return false;
-
-        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
-        PartyService partyService = AlleyPlugin.getInstance().getService(PartyService.class);
-        Profile profile = profileService.getProfile(player.getUniqueId());
-        if (profile == null || profile.getState() != ProfileState.PLAYING
-                || profile.getMatch() == null || profile.getMatch().getState() != MatchState.ENDING_MATCH) {
-            return false;
-        }
-        if (partyService.getParty(player) != null || profile.getQueueProfile() != null) {
-            return false;
-        }
-
-        QueueProfile queueProfile = new QueueProfile(this, player.getUniqueId());
-        queueProfile.setElo(elo);
-        queueProfile.setReady(false);
-        profile.setQueueProfile(queueProfile);
-        this.profiles.add(queueProfile);
-        return true;
-    }
-
-    public boolean activateAfterMatch(Player player) {
-        if (player == null) return false;
-
-        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
-        Profile profile = profileService.getProfile(player.getUniqueId());
-        QueueProfile queueProfile = profile == null ? null : profile.getQueueProfile();
-        if (queueProfile == null || queueProfile.getQueue() != this || queueProfile.isReady()
-                || !this.profiles.contains(queueProfile) || profile.getState() != ProfileState.LOBBY) {
-            return false;
-        }
-
-        queueProfile.setReady(true);
-        profile.setState(ProfileState.WAITING);
-        AlleyPlugin.getInstance().getService(HotbarService.class).applyHotbarItems(player);
-        player.sendMessage(CC.translate("&aPlay Again: queued for &6" + this.kit.getDisplayName() + "&a!"));
-        return true;
     }
 
     /**

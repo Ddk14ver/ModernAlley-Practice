@@ -5,11 +5,8 @@ import dev.revere.alley.feature.cosmetic.internal.repository.impl.projectiletrai
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 6/23/2025
- * 日期 6/23/2025
  */
 public class ProjectileTrailRepository extends BaseCosmeticRepository<ProjectileTrail> {
     public ProjectileTrailRepository() {

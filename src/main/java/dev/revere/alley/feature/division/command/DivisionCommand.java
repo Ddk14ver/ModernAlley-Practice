@@ -1,21 +1,51 @@
 package dev.revere.alley.feature.division.command;
 
 import dev.revere.alley.common.text.CC;
+import dev.revere.alley.feature.division.DivisionService;
 import dev.revere.alley.feature.division.menu.DivisionsMenu;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
+import dev.revere.alley.library.command.annotation.CompleterData;
 import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project Alley
- * 项目：Alley
  * @date 6/2/2024
- * 日期：6/2/2024
  */
 public class DivisionCommand extends BaseCommand {
+    @CompleterData(name = "division")
+    public List<String> divisionCompleter(CommandArgs command) {
+        List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
+
+        if (args.length == 1) {
+            if (command.getSender().hasPermission(this.getAdminPermission())) {
+                completion.addAll(Arrays.asList(
+                        "create", "delete", "list", "view",
+                        "setdescription", "setdisplayname", "seticon", "setwins"
+                ));
+            }
+            return completion;
+        }
+
+        if (args.length == 2) {
+            String subCommand = args[0].toLowerCase();
+            if (subCommand.equals("delete") || subCommand.equals("view") || subCommand.equals("setwins")
+                    || subCommand.equals("seticon") || subCommand.equals("setdisplayname") || subCommand.equals("setdescription")) {
+                this.plugin.getService(DivisionService.class).getDivisions().forEach(division -> completion.add(division.getName()));
+            }
+            return completion;
+        }
+
+        return completion;
+    }
+
     @CommandData(
             name = "division",
             usage = "division",

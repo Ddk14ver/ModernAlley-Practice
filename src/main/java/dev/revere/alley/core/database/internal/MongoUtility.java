@@ -16,6 +16,7 @@ import dev.revere.alley.common.serializer.Serializer;
 import lombok.Getter;
 import lombok.experimental.UtilityClass;
 import org.bson.Document;
+import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.*;
@@ -208,11 +209,13 @@ public class MongoUtility {
                 .putSafe("unrankedKitData", profileData::getUnrankedKitData, MongoUtility::convertUnrankedKitData)
                 .putSafe("rankedKitData", profileData::getRankedKitData, MongoUtility::convertRankedKitData)
                 .putSafe("ffaData", profileData::getFfaData, MongoUtility::convertFFAData)
+                .putSafe("tournamentKitWins", profileData::getTournamentKitWins, MongoUtility::convertTournamentKitWins)
                 .putSafe("layoutData", profileData::getLayoutData, MongoUtility::convertLayoutData)
                 .putSafe("settingData", profileData::getSettingData, MongoUtility::convertProfileSettingData)
                 .putSafe("cosmeticData", profileData::getCosmeticData, MongoUtility::convertProfileCosmeticData)
                 .putSafe("playTimeData", profileData::getPlayTimeData, MongoUtility::convertProfilePlayTimeData)
                 .putSafe("musicData", profileData::getMusicData, MongoUtility::convertProfileMusicData)
+                .putSafe("challengeData", profileData::getChallengeData, MongoUtility::convertProfileChallengeData)
                 .build();
     }
 
@@ -258,6 +261,12 @@ public class MongoUtility {
         parseAndMerge(profileDataDocument, "ffaData", MongoUtility::parseFFAData,
                 profileData.getFfaData(), profileData::setFfaData);
 
+        Document tournamentKitWinsDoc = profileDataDocument.get("tournamentKitWins", Document.class);
+        if (tournamentKitWinsDoc != null) {
+            tournamentKitWinsDoc.forEach((kitName, count) ->
+                    profileData.getTournamentKitWins().put(kitName, tournamentKitWinsDoc.getInteger(kitName, DEFAULT_INT)));
+        }
+
         parseAndSet(profileDataDocument, "layoutData", MongoUtility::parseProfileLayoutData,
                 profileData::setLayoutData, ProfileLayoutData::new);
         parseAndSet(profileDataDocument, "settingData", MongoUtility::parseProfileSettingData,
@@ -268,6 +277,13 @@ public class MongoUtility {
                 profileData::setPlayTimeData, ProfilePlayTimeData::new);
         parseAndSet(profileDataDocument, "musicData", MongoUtility::parseProfileMusicData,
                 profileData::setMusicData, MongoUtility::createDefaultMusicData);
+        parseAndSet(profileDataDocument, "challengeData", MongoUtility::parseProfileChallengeData,
+                profileData::setChallengeData, ProfileChallengeData::new);
+
+        // Division progression now counts wins from every mode, so recompute the stored
+        // division/tier from the combined win counts on load.
+        // 段位进度现在统计所有模式的胜场，因此在加载时根据总胜场重新计算存储的段位/层级。
+        profileData.refreshAllDivisions();
 
         return profileData;
     }
@@ -298,6 +314,9 @@ public class MongoUtility {
                             .put("wins", data.getWins())
                             .put("losses", data.getLosses())
                             .put("winstreak", data.getWinstreak())
+                            .put("bestwinstreak", data.getBestWinstreak())
+                            .put("monthlyPeriodKey", safeString(data.getMonthlyPeriodKey()))
+                            .put("monthlyWins", data.getMonthlyWins())
                             .build();
                     kitDataDocument.put(entry.getKey(), kitEntry);
                 });
@@ -329,11 +348,30 @@ public class MongoUtility {
                             .put("elo", data.getElo())
                             .put("wins", data.getWins())
                             .put("losses", data.getLosses())
+                            .put("winstreak", data.getWinstreak())
+                            .put("bestwinstreak", data.getBestWinstreak())
                             .build();
                     kitDataDocument.put(entry.getKey(), kitEntry);
                 });
 
         return kitDataDocument;
+    }
+
+    /**
+     * Converts a map of per-kit tournament wins to a MongoDB Document.
+     * 将每套件锦标赛胜场映射转换为 MongoDB Document。
+     *
+     * @param kitWins A map where the key is the kit name and the value is the tournament win count
+     *                键为套件名称、值为锦标赛胜场数的映射
+     * @return A Document representation of the kit wins, or empty Document if input is null
+     *         套件胜场的 Document 表示形式，如果输入为 null 则返回空的 Document
+     */
+    private static Document convertTournamentKitWins(Map<String, Integer> kitWins) {
+        Document document = new Document();
+        if (kitWins == null) return document;
+
+        kitWins.forEach(document::put);
+        return document;
     }
 
     /**
@@ -394,6 +432,8 @@ public class MongoUtility {
                                     .put("displayName", safeString(record.getDisplayName()))
                                     .put("items", record.getItems() != null ?
                                             Serializer.serializeItemStack(record.getItems()) : EMPTY_STRING)
+                                    .put("offhand", record.getOffhand() != null && record.getOffhand().getType() != Material.AIR ?
+                                            Serializer.serializeItemStack(new ItemStack[]{record.getOffhand()}) : EMPTY_STRING)
                                     .build())
                             .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
 
@@ -429,6 +469,17 @@ public class MongoUtility {
                 .put("lobbyMusicEnabled", settingData.isLobbyMusicEnabled())
                 .put("serverTitles", settingData.isServerTitles())
                 .put("hidePlayersEnabled", settingData.isHidePlayersEnabled())
+                .put("showMatchCps", settingData.isShowMatchCps())
+                .put("showMatchPing", settingData.isShowMatchPing())
+                .put("showMatchOpponent", settingData.isShowMatchOpponent())
+                .put("matchMvpMusicEnabled", settingData.isMatchMvpMusicEnabled())
+                .put("flyOnLoss", settingData.isFlyOnLoss())
+                .put("flyOnWin", settingData.isFlyOnWin())
+                .put("queuePingRange", settingData.getQueuePingRange())
+                .put("swingSlowlyEnabled", settingData.isSwingSlowlyEnabled())
+                .put("allowSpectators", settingData.isAllowSpectators())
+                .put("disablePublicChatWhenInMatch", settingData.isDisablePublicChatWhenInMatch())
+                .put("hideOtherSpectators", settingData.isHideOtherSpectators())
                 .put("chatChannel", safeString(settingData.getChatChannel()))
                 .put("time", safeString(settingData.getTime()))
                 .build();
@@ -508,6 +559,31 @@ public class MongoUtility {
                 .build();
     }
 
+    private static Document convertProfileChallengeData(ProfileChallengeData challengeData) {
+        return new DocumentBuilder()
+                .put("dailyPeriodKey", safeString(challengeData.getDailyPeriodKey()))
+                .put("weeklyPeriodKey", safeString(challengeData.getWeeklyPeriodKey()))
+                .put("dailyStates", convertChallengeStates(challengeData.getDailyStates()))
+                .put("weeklyStates", convertChallengeStates(challengeData.getWeeklyStates()))
+                .build();
+    }
+
+    private static Document convertChallengeStates(Map<String, ProfileChallengeProgress> states) {
+        Document document = new Document();
+        if (states == null) return document;
+
+        states.forEach((key, progress) -> {
+            if (key == null || progress == null) return;
+            document.put(key, new DocumentBuilder()
+                    .put("accepted", progress.isAccepted())
+                    .put("progress", progress.getProgress())
+                    .put("completed", progress.isCompleted())
+                    .put("rewarded", progress.isRewarded())
+                    .build());
+        });
+        return document;
+    }
+
     /**
      * Parses a MongoDB Document into a map of unranked kit data.
      * Reconstructs ProfileUnrankedKitData objects with division, tier, and statistics.
@@ -552,6 +628,9 @@ public class MongoUtility {
                 kit.setWins(kitEntry.getInteger("wins", DEFAULT_INT));
                 kit.setLosses(kitEntry.getInteger("losses", DEFAULT_INT));
                 kit.setWinstreak(kitEntry.getInteger("winstreak", DEFAULT_INT));
+                kit.setBestWinstreak(kitEntry.getInteger("bestwinstreak", DEFAULT_INT));
+                kit.setMonthlyPeriodKey(safeString(kitEntry.getString("monthlyPeriodKey")));
+                kit.setMonthlyWins(kitEntry.getInteger("monthlyWins", DEFAULT_INT));
 
                 kitData.put(key, kit);
             } catch (Exception e) {
@@ -587,6 +666,8 @@ public class MongoUtility {
                 kit.setElo(kitEntry.getInteger("elo", DEFAULT_ELO));
                 kit.setWins(kitEntry.getInteger("wins", DEFAULT_INT));
                 kit.setLosses(kitEntry.getInteger("losses", DEFAULT_INT));
+                kit.setWinstreak(kitEntry.getInteger("winstreak", DEFAULT_INT));
+                kit.setBestWinstreak(kitEntry.getInteger("bestwinstreak", DEFAULT_INT));
 
                 kitData.put(key, kit);
             } catch (Exception e) {
@@ -678,6 +759,19 @@ public class MongoUtility {
                                         safeString(displayName),
                                         items != null ? items : new ItemStack[0]
                                 );
+
+                                String offhandString = record.getString("offhand");
+                                if (offhandString != null && !offhandString.isEmpty()) {
+                                    try {
+                                        ItemStack[] offhandArr = Serializer.deserializeItemStack(offhandString);
+                                        if (offhandArr != null && offhandArr.length > 0) {
+                                            layoutRecord.setOffhand(offhandArr[0]);
+                                        }
+                                    } catch (Exception e) {
+                                        Logger.logException(String.format("Failed to deserialize offhand for layout: %s", name), e);
+                                    }
+                                }
+
                                 layoutRecords.add(layoutRecord);
                             });
                 }
@@ -724,6 +818,35 @@ public class MongoUtility {
         return createDefaultMusicData();
     }
 
+    private static ProfileChallengeData parseProfileChallengeData(Document challengeDocument) {
+        ProfileChallengeData challengeData = new ProfileChallengeData();
+        if (challengeDocument == null) return challengeData;
+
+        challengeData.setDailyPeriodKey(challengeDocument.getString("dailyPeriodKey") == null
+                ? EMPTY_STRING : challengeDocument.getString("dailyPeriodKey"));
+        challengeData.setWeeklyPeriodKey(challengeDocument.getString("weeklyPeriodKey") == null
+                ? EMPTY_STRING : challengeDocument.getString("weeklyPeriodKey"));
+        challengeData.setDailyStates(parseChallengeStates(challengeDocument.get("dailyStates", Document.class)));
+        challengeData.setWeeklyStates(parseChallengeStates(challengeDocument.get("weeklyStates", Document.class)));
+        return challengeData;
+    }
+
+    private static Map<String, ProfileChallengeProgress> parseChallengeStates(Document statesDocument) {
+        Map<String, ProfileChallengeProgress> states = new HashMap<>();
+        if (statesDocument == null) return states;
+
+        statesDocument.forEach((key, value) -> {
+            if (!(value instanceof Document progressDocument)) return;
+            ProfileChallengeProgress progress = new ProfileChallengeProgress();
+            progress.setAccepted(progressDocument.getBoolean("accepted", DEFAULT_BOOLEAN_FALSE));
+            progress.setProgress(Math.max(DEFAULT_INT, progressDocument.getInteger("progress", DEFAULT_INT)));
+            progress.setCompleted(progressDocument.getBoolean("completed", DEFAULT_BOOLEAN_FALSE));
+            progress.setRewarded(progressDocument.getBoolean("rewarded", DEFAULT_BOOLEAN_FALSE));
+            states.put(key, progress);
+        });
+        return states;
+    }
+
     /**
      * Parses a MongoDB Document into ProfileSettingData.
      * Reconstructs all user preference settings with appropriate default values.
@@ -752,6 +875,17 @@ public class MongoUtility {
         settingData.setLobbyMusicEnabled(settingDocument.getBoolean("lobbyMusicEnabled", DEFAULT_BOOLEAN_TRUE));
         settingData.setServerTitles(settingDocument.getBoolean("serverTitles", DEFAULT_BOOLEAN_TRUE));
         settingData.setHidePlayersEnabled(settingDocument.getBoolean("hidePlayersEnabled", DEFAULT_BOOLEAN_FALSE));
+        settingData.setShowMatchCps(settingDocument.getBoolean("showMatchCps", DEFAULT_BOOLEAN_FALSE));
+        settingData.setShowMatchPing(settingDocument.getBoolean("showMatchPing", DEFAULT_BOOLEAN_TRUE));
+        settingData.setShowMatchOpponent(settingDocument.getBoolean("showMatchOpponent", DEFAULT_BOOLEAN_TRUE));
+        settingData.setMatchMvpMusicEnabled(settingDocument.getBoolean("matchMvpMusicEnabled", DEFAULT_BOOLEAN_TRUE));
+        settingData.setFlyOnLoss(settingDocument.getBoolean("flyOnLoss", DEFAULT_BOOLEAN_FALSE));
+        settingData.setFlyOnWin(settingDocument.getBoolean("flyOnWin", DEFAULT_BOOLEAN_TRUE));
+        settingData.setQueuePingRange(settingDocument.getInteger("queuePingRange", DEFAULT_INT));
+        settingData.setSwingSlowlyEnabled(settingDocument.getBoolean("swingSlowlyEnabled", DEFAULT_BOOLEAN_TRUE));
+        settingData.setAllowSpectators(settingDocument.getBoolean("allowSpectators", DEFAULT_BOOLEAN_TRUE));
+        settingData.setDisablePublicChatWhenInMatch(settingDocument.getBoolean("disablePublicChatWhenInMatch", DEFAULT_BOOLEAN_FALSE));
+        settingData.setHideOtherSpectators(settingDocument.getBoolean("hideOtherSpectators", DEFAULT_BOOLEAN_FALSE));
 
         String chatChannel = settingDocument.getString("chatChannel");
         settingData.setChatChannel(chatChannel != null ? chatChannel : ChatChannel.GLOBAL.toString());

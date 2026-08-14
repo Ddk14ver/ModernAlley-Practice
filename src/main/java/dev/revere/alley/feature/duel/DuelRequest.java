@@ -8,11 +8,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 17/10/2024 - 20:04
- * 日期：2024年10月17日 - 20:04
  */
 @Getter
 @Setter

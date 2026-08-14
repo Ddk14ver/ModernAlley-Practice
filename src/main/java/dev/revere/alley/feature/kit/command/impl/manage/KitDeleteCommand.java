@@ -14,11 +14,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者: Emmy
  * @project Alley
- * 项目: Alley
  * @date 20/05/2024
- * 日期: 20/05/2024
  */
 public class KitDeleteCommand extends BaseCommand {
     @CommandData(

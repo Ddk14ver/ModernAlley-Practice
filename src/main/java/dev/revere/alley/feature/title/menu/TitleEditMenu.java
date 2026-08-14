@@ -60,7 +60,10 @@ public class TitleEditMenu extends Menu {
         buttons.put(28, new ToggleEnabledButton(this.title, this.titleService));
         buttons.put(30, new TogglePurchasableButton(this.title, this.titleService));
 
-        // Row 4: Navigation
+        // Row 4: Delete (custom titles only) + Navigation
+        if (this.title.getKit() == null) {
+            buttons.put(33, new DeleteTitleButton(this.title, this.titleService));
+        }
         buttons.put(31, new SaveAndBackButton(this.title, this.titleService));
         buttons.put(34, new BackButton());
 
@@ -313,6 +316,49 @@ public class TitleEditMenu extends Menu {
             this.title.setPurchasable(!this.title.isPurchasable());
             this.titleService.saveTitle(this.title);
             new TitleEditMenu(this.title, this.titleService).openMenu(player);
+            this.playSuccess(player);
+        }
+    }
+
+    /**
+     * Delete the custom title button. Only shown for custom titles (no kit).
+     * 删除自定义头衔按钮。仅对自定义头衔显示。
+     */
+    private static class DeleteTitleButton extends Button {
+        private final TitleRecord title;
+        private final TitleServiceImpl titleService;
+
+        public DeleteTitleButton(TitleRecord title, TitleServiceImpl titleService) {
+            this.title = title;
+            this.titleService = titleService;
+        }
+
+        @Override
+        public ItemStack getButtonItem(Player player) {
+            return new ItemBuilder(Material.LAVA_BUCKET)
+                    .name("&c&lDelete Title")
+                    .lore(
+                            CC.MENU_BAR,
+                            "&cWarning: This cannot be undone!",
+                            "",
+                            "&eShift-Click &7to confirm delete.",
+                            CC.MENU_BAR
+                    )
+                    .hideMeta()
+                    .build();
+        }
+
+        @Override
+        public void clicked(Player player, ClickType clickType) {
+            if (clickType != ClickType.SHIFT_LEFT && clickType != ClickType.SHIFT_RIGHT) {
+                player.sendMessage(CC.translate("&cShift-click to confirm deletion!"));
+                this.playFail(player);
+                return;
+            }
+            String name = this.title.getName();
+            this.titleService.deleteTitle(this.title);
+            player.sendMessage(CC.translate("&aCustom title '&6" + name + "&a' has been deleted."));
+            new TitleManagementMenu().openMenu(player);
             this.playSuccess(player);
         }
     }

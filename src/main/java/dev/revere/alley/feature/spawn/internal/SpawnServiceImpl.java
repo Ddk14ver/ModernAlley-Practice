@@ -1,5 +1,6 @@
 package dev.revere.alley.feature.spawn.internal;
 
+import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.bootstrap.AlleyContext;
 import dev.revere.alley.bootstrap.annotation.Service;
 import dev.revere.alley.common.PlayerUtil;
@@ -9,6 +10,7 @@ import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.SettingsLocaleImpl;
 import dev.revere.alley.feature.spawn.SpawnService;
 import lombok.Getter;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
@@ -60,6 +62,18 @@ public class SpawnServiceImpl implements SpawnService {
 
     @Override
     public void teleportToSpawn(Player player) {
+        if (player == null) return;
+
+        // SparklyPaper/Moonrise may dispatch entity and death callbacks on a
+        // region tick worker. Cross-world teleports and PlayerUtil.reset are
+        // main-thread-only operations, so marshal the complete operation before
+        // touching either Bukkit API.
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(),
+                    () -> teleportToSpawn(player));
+            return;
+        }
+
         if (this.location == null) {
             Logger.error("Cannot teleport " + player.getName() + " to spawn: Spawn location is not set.");
             return;

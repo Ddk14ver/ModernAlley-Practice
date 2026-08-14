@@ -2,6 +2,7 @@ package dev.revere.alley.feature.host.menu;
 
 import dev.revere.alley.common.item.ItemBuilder;
 import dev.revere.alley.feature.tournament.menu.TournamentHostTypeMenu;
+import dev.revere.alley.feature.event.menu.EventHostTypeMenu;
 import dev.revere.alley.library.menu.Button;
 import dev.revere.alley.library.menu.Menu;
 import lombok.AllArgsConstructor;
@@ -17,11 +18,8 @@ import java.util.Map;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 08/06/2024 - 21:19
- * 日期：2024年6月8日 - 21:19
  */
 public class HostMenu extends Menu {
     @Override
@@ -36,9 +34,6 @@ public class HostMenu extends Menu {
         buttons.put(11, new HostButton("&6&lEvent", new ItemStack(Material.MAP), Arrays.asList(
                 "&fHost an event with different",
                 "&funique implementations.",
-                "",
-                " &6│ &6Types: &7Sumo",
-                " &6│ &cMore soon...",
                 "",
                 "&aClick to host!"
         )));
@@ -81,7 +76,7 @@ public class HostMenu extends Menu {
                     new TournamentHostTypeMenu().openMenu(player);
                     break;
                 case MAP:
-                    //new EventMenu().openMenu(player);
+                    new EventHostTypeMenu().openMenu(player);
                     break;
             }
 

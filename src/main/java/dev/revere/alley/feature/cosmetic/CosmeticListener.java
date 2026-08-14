@@ -12,11 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author Remi
- *         雷米
  * @project alley-practice
- *         alley-practice 项目
  * @date 4/08/2025
- *         2025年8月4日
  */
 public class CosmeticListener implements Listener {
     private static final Map<UUID, Long> lastMoveTimes = new ConcurrentHashMap<>();

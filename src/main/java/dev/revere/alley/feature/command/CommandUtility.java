@@ -25,6 +25,7 @@ import dev.revere.alley.feature.abilities.command.AbilityCommand;
 import dev.revere.alley.feature.cosmetic.command.CosmeticCommand;
 import dev.revere.alley.feature.division.command.DivisionCommand;
 import dev.revere.alley.feature.emoji.command.EmojiCommand;
+import dev.revere.alley.feature.event.command.EventCommand;
 import dev.revere.alley.feature.layout.command.LayoutCommand;
 import dev.revere.alley.feature.leaderboard.command.LeaderboardCommand;
 import dev.revere.alley.feature.level.command.LevelAdminCommand;
@@ -151,6 +152,7 @@ public class CommandUtility {
             new LayoutCommand();
 
             new HostCommand();
+            new EventCommand();
             new EmojiCommand();
         });
     }

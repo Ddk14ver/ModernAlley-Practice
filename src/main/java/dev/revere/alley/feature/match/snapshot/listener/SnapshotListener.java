@@ -3,6 +3,7 @@ package dev.revere.alley.feature.match.snapshot.listener;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.core.profile.ProfileService;
@@ -82,6 +83,8 @@ public class SnapshotListener implements Listener {
 
         Player attacker = (Player) event.getDamager();
         Player defender = (Player) event.getEntity();
+        if (AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .wasInsideHurtResistanceWindow(defender)) return;
 
         Profile attackerProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(attacker.getUniqueId());
         Profile defenderProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(defender.getUniqueId());

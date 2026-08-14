@@ -14,8 +14,10 @@ import dev.revere.alley.feature.kit.setting.types.mode.KitSettingSpleef;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingSumo;
 import dev.revere.alley.feature.kit.setting.types.visual.KitSettingBowShotIndicator;
 import dev.revere.alley.feature.kit.setting.types.visual.KitSettingHealthBar;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.event.skywars.SkyWarsMatch;
 import dev.revere.alley.feature.match.internal.types.HideAndSeekMatch;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.model.GameParticipant;
@@ -34,6 +36,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityRegainHealthEvent;
+import org.bukkit.event.player.PlayerToggleSprintEvent;
 
 /**
  * Match damage listener for handling damage events during matches.
@@ -52,7 +56,13 @@ public class MatchDamageListener implements Listener {
 
         if (profile.getState() == ProfileState.SPECTATING) event.setCancelled(true);
         if (profile.getState() == ProfileState.PLAYING) {
-            Kit matchKit = profile.getMatch().getKit();
+            Match match = profile.getMatch();
+            if (match == null) return;
+            if (match instanceof SkyWarsMatch skyWarsMatch && skyWarsMatch.isProtectionActive()) {
+                event.setCancelled(true);
+                return;
+            }
+            Kit matchKit = match.getKit();
 
             if (matchKit.isSettingEnabled(KitSettingNoFallDamageImpl.class)
                     && event.getCause() == EntityDamageEvent.DamageCause.FALL) {
@@ -66,12 +76,12 @@ public class MatchDamageListener implements Listener {
                 event.setCancelled(true);
             }
 
-            if (profile.getMatch().getState() != MatchState.RUNNING) {
+            if (match.getState() != MatchState.RUNNING) {
                 event.setCancelled(true);
                 return;
             }
 
-            if (profile.getMatch().getGamePlayer(player).isDead()) {
+            if (match.getGamePlayer(player).isDead()) {
                 event.setCancelled(true);
                 return;
             }
@@ -80,10 +90,85 @@ public class MatchDamageListener implements Listener {
                     || matchKit.isSettingEnabled(KitSettingSumo.class)
                     || matchKit.isSettingEnabled(KitSettingSpleef.class)
                     || matchKit.isSettingEnabled(KitSettingNoDamageImpl.class)) {
+                // A cancelled event must not open a fresh hurt window. This is
+                // especially important for fall/no-fall damage in Boxing/Sumo:
+                // the event is cancelled above and must not make the next attack
+                // look like it arrived during a newly armed i-frame.
+                if (event.isCancelled()) return;
                 event.setDamage(0);
                 player.setHealth(player.getMaxHealth());
+                // The final damage is intentionally zero. The monitor handler below
+                // arms the window after all listeners have accepted this event.
                 player.updateInventory();
             }
+        }
+    }
+
+    /**
+     * NMS skips refreshing hurt resistance when a mode changes the final damage
+     * to zero. Arm the window only after every damage listener accepted the event;
+     * this prevents a later cancellation (fall protection, teams, etc.) from
+     * opening a phantom hit-delay window.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    private void armNoDamageModeWindow(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) return;
+
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                .getProfile(player.getUniqueId());
+        if (profile == null || profile.getState() != ProfileState.PLAYING) return;
+        Match match = profile.getMatch();
+        if (match == null || match.getState() != MatchState.RUNNING) return;
+        MatchGamePlayer gamePlayer = match.getGamePlayer(player);
+        if (gamePlayer == null || gamePlayer.isDead()) return;
+
+        Kit kit = match.getKit();
+        if (!(kit.isSettingEnabled(KitSettingBoxing.class)
+                || kit.isSettingEnabled(KitSettingSumo.class)
+                || kit.isSettingEnabled(KitSettingSpleef.class)
+                || kit.isSettingEnabled(KitSettingNoDamageImpl.class))) return;
+
+        int maximum = player.getMaximumNoDamageTicks();
+        if (maximum <= 0 || player.getNoDamageTicks() > maximum / 2) return;
+        player.setNoDamageTicks(maximum);
+    }
+
+    /**
+     * Accumulates the amount of health a player naturally regenerates during a match
+     * (RegainReason.REGEN), shown in the post-match snapshot as "Regen".
+     * 统计玩家在对局中自然回血的血量（显示为快照里的 Regen）。
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onNaturalRegen(EntityRegainHealthEvent event) {
+        if (event.getRegainReason() != EntityRegainHealthEvent.RegainReason.REGEN) return;
+        if (!(event.getEntity() instanceof Player player)) return;
+
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
+        if (profile == null || profile.getState() != ProfileState.PLAYING) return;
+        Match match = profile.getMatch();
+        if (match == null) return;
+
+        MatchGamePlayer gamePlayer = match.getGamePlayer(player);
+        if (gamePlayer != null) {
+            gamePlayer.getData().addRegen(event.getAmount());
+        }
+    }
+
+    /**
+     * Tracks W-tap attempts: timestamps when a player stops sprinting (releases W) during a match.
+     * W-tap 尝试统计：记录玩家在对局中停止疾跑（松开 W）的时间点，用于后续判定 W-tap。
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSprintToggle(PlayerToggleSprintEvent event) {
+        Player player = event.getPlayer();
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
+        if (profile == null || profile.getState() != ProfileState.PLAYING) return;
+        Match match = profile.getMatch();
+        if (match == null) return;
+
+        MatchGamePlayer gamePlayer = match.getGamePlayer(player);
+        if (gamePlayer != null) {
+            gamePlayer.getData().onSprintToggle(event.isSprinting());
         }
     }
 
@@ -122,6 +207,11 @@ public class MatchDamageListener implements Listener {
                 return;
             }
 
+            if (match instanceof SkyWarsMatch skyWarsMatch && skyWarsMatch.isProtectionActive()) {
+                event.setCancelled(true);
+                return;
+            }
+
             if (match.getGamePlayer(damaged).isDead() || match.getGamePlayer(attacker).isDead()) {
                 event.setCancelled(true);
                 return;
@@ -148,6 +238,11 @@ public class MatchDamageListener implements Listener {
                 return;
             }
 
+            // A higher hit inside the legacy hurt window only
+            // contributes its damage delta. It is not a new Boxing/combo hit.
+            if (AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                    .wasInsideHurtResistanceWindow(damaged)) return;
+
             if (!attacker.getUniqueId().equals(damaged.getUniqueId())) {
                 // Fishing rod hits are marked with a scoreboard tag — skip hit counting
                 boolean isRodHit = damaged.getScoreboardTags().contains("alley_rod");
@@ -159,7 +254,7 @@ public class MatchDamageListener implements Listener {
                 if (isMelee && !isRodHit) {
                     var attackerData = attackerProfile.getMatch().getGamePlayer(attacker).getData();
                     attackerData.handleAttack();
-                    attackerData.tryDetectWTap(attacker.isSprinting());
+                    attackerData.handleWTap(attacker.isSprinting());
                 }
                 damagedProfile.getMatch().getGamePlayer(damaged).getData().resetCombo();
 
@@ -232,6 +327,9 @@ public class MatchDamageListener implements Listener {
 
             if (profile.getState() == ProfileState.PLAYING) {
                 Player player = (Player) event.getEntity();
+
+                if (AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                        .wasInsideHurtResistanceWindow(player)) return;
 
                 AlleyPlugin.getInstance().getService(CombatService.class).setLastAttacker(player, attacker);
 

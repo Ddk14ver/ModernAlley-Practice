@@ -112,11 +112,19 @@ public class KitServiceImpl implements KitService {
                 if (loaded != null && loaded.length > 0) kit.setIconItem(loaded[0]);
             }
 
+            // Load the kit's default offhand item (if saved)
+            String offhandData = config.getString(key + ".offhand");
+            if (offhandData != null && !offhandData.isEmpty()) {
+                ItemStack[] offhandArr = Serializer.deserializeItemStack(offhandData);
+                if (offhandArr != null && offhandArr.length > 0) kit.setOffhand(offhandArr[0]);
+            }
+
             kit.setEnabled(config.getBoolean(key + ".enabled"));
             kit.setEditable(config.getBoolean(key + ".editable"));
             kit.setKnockbackProfile(config.getString(key + ".knockback-profile"));
             kit.setHideAndSeekSeekerKit(config.getString(key + ".hide-and-seek.seeker-kit", ""));
             kit.setHideAndSeekHiderKit(config.getString(key + ".hide-and-seek.hider-kit", ""));
+            kit.setSkyWarsResourceKit(config.getString(key + ".skywars.resource-kit", ""));
             kit.setBotAiMode(BotAiMode.fromName(config.getString(key + ".bot.ai-mode", "MELEE")));
 
             this.setupFFA(kit, config, key);
@@ -152,8 +160,14 @@ public class KitServiceImpl implements KitService {
             if (kitSetting == null) continue;
 
             if (kitSetting instanceof KitSettingOldHitDelay) {
-                kitSetting.setValue(this.normalizeOldHitDelay(settingsSection.get(settingName)));
-                kitSetting.setEnabled(true);
+                Object storedValue = settingsSection.get(settingName);
+                if (storedValue instanceof Boolean enabled) {
+                    kitSetting.setValue(KitSettingOldHitDelay.DEFAULT_DELAY);
+                    kitSetting.setEnabled(enabled);
+                } else {
+                    kitSetting.setValue(this.normalizeOldHitDelay(storedValue));
+                    kitSetting.setEnabled(true);
+                }
             } else if (kitSetting instanceof KitSettingPearlCooldownImpl) {
                 int seconds = this.normalizePearlCooldown(settingsSection.get(settingName));
                 kitSetting.setValue(seconds);
@@ -211,13 +225,13 @@ public class KitServiceImpl implements KitService {
                 });
 
         int delay = Math.max(0, setting.getValue());
-        boolean changed = !setting.isEnabled() || setting.getValue() != delay;
-        setting.setEnabled(true);
+        boolean changed = setting.getValue() != delay;
         setting.setValue(delay);
 
         Object storedValue = config.get(key + ".settings." + setting.getName());
-        if (!(storedValue instanceof Number number) || number.doubleValue() != delay) {
-            config.set(key + ".settings." + setting.getName(), delay);
+        Object synchronizedValue = setting.isEnabled() ? Integer.valueOf(delay) : Boolean.FALSE;
+        if (!synchronizedValue.equals(storedValue)) {
+            config.set(key + ".settings." + setting.getName(), synchronizedValue);
             changed = true;
         }
         return changed;
@@ -354,8 +368,11 @@ public class KitServiceImpl implements KitService {
      */
     private void saveKitSettings(FileConfiguration config, String key, Kit kit) {
         for (KitSetting kitSetting : kit.getKitSettings()) {
-            if (kitSetting instanceof KitSettingOldHitDelay
-                    || kitSetting instanceof KitSettingPearlCooldownImpl) {
+            if (kitSetting instanceof KitSettingOldHitDelay) {
+                Object storedValue = kitSetting.isEnabled()
+                        ? Integer.valueOf(kitSetting.getValue()) : Boolean.FALSE;
+                config.set(key + ".settings." + kitSetting.getName(), storedValue);
+            } else if (kitSetting instanceof KitSettingPearlCooldownImpl) {
                 config.set(key + ".settings." + kitSetting.getName(), kitSetting.getValue());
             } else {
                 config.set(key + ".settings." + kitSetting.getName(), kitSetting.isEnabled());
@@ -435,8 +452,11 @@ public class KitServiceImpl implements KitService {
             }
 
             kit.addKitSetting(settingInstance);
-            if (settingInstance instanceof KitSettingOldHitDelay
-                    || settingInstance instanceof KitSettingPearlCooldownImpl) {
+            if (settingInstance instanceof KitSettingOldHitDelay) {
+                Object storedValue = settingInstance.isEnabled()
+                        ? Integer.valueOf(settingInstance.getValue()) : Boolean.FALSE;
+                config.set(key + ".settings." + settingInstance.getName(), storedValue);
+            } else if (settingInstance instanceof KitSettingPearlCooldownImpl) {
                 config.set(key + ".settings." + settingInstance.getName(), settingInstance.getValue());
             } else {
                 config.set(key + ".settings." + settingInstance.getName(), settingInstance.isEnabled());
@@ -510,10 +530,13 @@ public class KitServiceImpl implements KitService {
         config.set(key + ".ffa.max-players", kit.getMaxFfaPlayers());
         config.set(key + ".hide-and-seek.seeker-kit", kit.getHideAndSeekSeekerKit());
         config.set(key + ".hide-and-seek.hider-kit", kit.getHideAndSeekHiderKit());
+        config.set(key + ".skywars.resource-kit", kit.getSkyWarsResourceKit());
         config.set(key + ".bot.ai-mode", kit.getBotAiMode().name());
         config.set(key + ".items", Serializer.serializeItemStack(kit.getItems()));
         config.set(key + ".armor", Serializer.serializeItemStack(kit.getArmor()));
         config.set(key + ".knockback-profile", kit.getKnockbackProfile());
         config.set(key + ".editor-items", Serializer.serializeItemStack(kit.getEditorItems()));
+        config.set(key + ".offhand", kit.getOffhand() != null && kit.getOffhand().getType() != Material.AIR ?
+                Serializer.serializeItemStack(new ItemStack[]{kit.getOffhand()}) : null);
     }
 }

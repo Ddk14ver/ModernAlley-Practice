@@ -269,6 +269,10 @@ public class QueueTask implements Runnable {
         GamePlayerList gamePlayerList = getGamePlayerList(firstPlayer, secondPlayer, firstProfile, secondProfile);
         GameParticipantList gameParticipantList = getSoloGameParticipantList(gamePlayerList);
 
+        if (!isPingCompatible(firstPlayer, secondPlayer)) {
+            return false;
+        }
+
         Arena arena = this.getArena(queue);
         if (!isArenaAvailable(arena, Arrays.asList(firstPlayer, secondPlayer), queue)) {
             return false;
@@ -584,6 +588,10 @@ public class QueueTask implements Runnable {
             return false;
         }
 
+        if (!areParticipantsPingCompatible(participantA, participantB)) {
+            return false;
+        }
+
         Arena arena = this.getArena(queue);
         if (!isArenaAvailable(arena, allMatchPlayers, queue)) {
             List<UUID> allUUIDsToRemove = allMatchPlayers.stream()
@@ -595,7 +603,7 @@ public class QueueTask implements Runnable {
 
         MatchService matchService = AlleyPlugin.getInstance().getService(MatchService.class);
         matchService.createAndStartMatch(
-                queue.getKit(), arena, participantA, participantB, true, false, queue.isRanked()
+                queue.getKit(), arena, participantA, participantB, true, true, queue.isRanked()
         );
 
         List<UUID> allUUIDsToRemove = allMatchPlayers.stream()
@@ -603,6 +611,45 @@ public class QueueTask implements Runnable {
                 .collect(Collectors.toList());
         clearQueueProfiles(queue, allUUIDsToRemove, false);
         return true;
+    }
+
+    /**
+     * Checks both players' personal queue-ping preferences. A disabled range
+     * does not restrict that player; an enabled range must accept the other
+     * player's current ping as well.
+     */
+    private boolean isPingCompatible(Player first, Player second) {
+        if (first == null || second == null) {
+            return false;
+        }
+
+        int difference = Math.abs(first.getPing() - second.getPing());
+        return acceptsPingDifference(first.getUniqueId(), difference)
+                && acceptsPingDifference(second.getUniqueId(), difference);
+    }
+
+    private boolean areParticipantsPingCompatible(GameParticipant<MatchGamePlayer> first,
+                                                  GameParticipant<MatchGamePlayer> second) {
+        for (MatchGamePlayer firstPlayer : first.getAllPlayers()) {
+            for (MatchGamePlayer secondPlayer : second.getAllPlayers()) {
+                Player firstBukkitPlayer = Bukkit.getPlayer(firstPlayer.getUuid());
+                Player secondBukkitPlayer = Bukkit.getPlayer(secondPlayer.getUuid());
+                if (!isPingCompatible(firstBukkitPlayer, secondBukkitPlayer)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean acceptsPingDifference(UUID playerId, int difference) {
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(playerId);
+        if (profile == null) {
+            return true;
+        }
+
+        int range = profile.getProfileData().getSettingData().getQueuePingRange();
+        return range <= 0 || difference <= range;
     }
 
     /**

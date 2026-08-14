@@ -15,11 +15,8 @@ import java.util.stream.Collectors;
 
 /**
  * @author Remi
- * @author 作者 Remi
  * @project alley-practice
- * @project 项目 alley-practice
  * @date 27/06/2025
- * @date 日期 27/06/2025
  */
 public abstract class KillMessagePack extends BaseCosmetic {
     private final Map<EntityDamageEvent.DamageCause, List<String>> messagesByCause = new EnumMap<>(EntityDamageEvent.DamageCause.class);

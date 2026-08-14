@@ -5,11 +5,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- *   作者: Remi
  * @project alley-practice
- *   项目: alley-practice
  * @date 6/08/2025
- *   日期: 6/08/2025
  */
 public abstract class BaseKillEffect extends BaseCosmetic {
     /**

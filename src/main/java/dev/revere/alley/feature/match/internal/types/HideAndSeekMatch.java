@@ -11,6 +11,7 @@ import dev.revere.alley.feature.arena.Arena;
 import dev.revere.alley.feature.arena.ArenaService;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
+import dev.revere.alley.feature.match.listener.MatchListener;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.GamePlayer;
 import dev.revere.alley.feature.match.model.TeamGameParticipant;
@@ -110,7 +111,7 @@ public class HideAndSeekMatch extends DefaultMatch {
         if (isHider) {
             Location hiderSpawn = getHiderSpawn();
             if (hiderSpawn != null) {
-                player.teleport(hiderSpawn);
+                player.teleportAsync(hiderSpawn);
             }
             player.setMaxHealth(hiderHealthHearts * 2.0);
             player.setHealth(player.getMaxHealth());
@@ -202,8 +203,8 @@ public class HideAndSeekMatch extends DefaultMatch {
             }
 
             getParticipantA().getPlayers().forEach(seeker -> {
-                Player p = plugin.getServer().getPlayer(seeker.getUuid());
-                if (p != null) p.teleport(getArena().getPos2());
+                Player p = seeker.getTeamPlayer();
+                if (p != null) p.teleportAsync(getArena().getPos2());
             });
 
             broadcastToAll(CC.translate("&c&lSEEKERS HAVE BEEN RELEASED! &7They have &e" + formatTime(gameTimeSeconds) + " &7to find all hiders."));
@@ -228,7 +229,7 @@ public class HideAndSeekMatch extends DefaultMatch {
                 this.timeExpired = true;
                 broadcastToAll(CC.translate("&c&lTIME IS UP! &7Hiders win!"));
                 new ArrayList<>(getParticipantA().getPlayers()).forEach(seeker -> {
-                    Player p = Bukkit.getPlayer(seeker.getUuid());
+                    Player p = seeker.getTeamPlayer();
                     if (p != null && !seeker.isDead()) handleDeath(p, EntityDamageEvent.DamageCause.CUSTOM);
                 });
             }, gameTimeSeconds * 20L);
@@ -238,7 +239,10 @@ public class HideAndSeekMatch extends DefaultMatch {
 
     @Override
     public void handleDeath(Player player, EntityDamageEvent.DamageCause cause) {
+        if (this.deferToPrimaryThread(() -> this.handleDeath(player, cause))) return;
+
         GameParticipant<MatchGamePlayer> participant = getParticipant(player);
+        if (participant != null) MatchListener.blockDeadPlayerPickup(player);
         if (participant == getParticipantA()) {
             if (this.timeExpired) {
                 super.handleDeath(player, cause);
@@ -257,7 +261,10 @@ public class HideAndSeekMatch extends DefaultMatch {
 
     @Override
     public void handleRespawn(Player player) {
-        player.spigot().respawn();
+        // In party matches the lethal damage is cancelled and the player is kept at full
+        // health before handleDeath runs, so they may still be alive here — respawning an
+        // alive player sends an invalid respawn packet and kicks them with a protocol error.
+        if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, true, false);
         if (gameEndTask == null) ListenerUtil.teleportAndClearSpawn(player, getIntermissionSpawn());
         else ListenerUtil.teleportAndClearSpawn(player, getArena().getPos2());
@@ -301,21 +308,21 @@ public class HideAndSeekMatch extends DefaultMatch {
     // --- Helpers ---
     private void addAllPlayersToBar() {
         getParticipants().forEach(p -> p.getPlayers().forEach(mp -> {
-            Player pl = Bukkit.getPlayer(mp.getUuid());
+            Player pl = mp.getTeamPlayer();
             if (pl != null) countdownBar.addPlayer(pl);
         }));
     }
 
     private void playPlingToAll() {
         getParticipants().forEach(p -> p.getPlayers().forEach(mp -> {
-            Player pl = Bukkit.getPlayer(mp.getUuid());
+            Player pl = mp.getTeamPlayer();
             if (pl != null) pl.playSound(pl.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 1f);
         }));
     }
 
     private void broadcastToAll(String msg) {
         getParticipants().forEach(p -> p.getPlayers().forEach(mp -> {
-            Player pl = Bukkit.getPlayer(mp.getUuid());
+            Player pl = mp.getTeamPlayer();
             if (pl != null) pl.sendMessage(msg);
         }));
     }

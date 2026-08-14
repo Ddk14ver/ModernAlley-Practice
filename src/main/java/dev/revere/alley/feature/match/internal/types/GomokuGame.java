@@ -80,7 +80,7 @@ final class GomokuGame {
         player.setGameMode(GameMode.ADVENTURE);
         player.setAllowFlight(true);
         player.setFlying(true);
-        player.teleport(player.getLocation().clone().add(0.0, 60.0, 0.0));
+        player.teleportAsync(player.getLocation().clone().add(0.0, 60.0, 0.0));
         player.updateInventory();
     }
 

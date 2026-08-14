@@ -52,6 +52,7 @@ public class LayoutSaveButton extends Button {
         LayoutData layout = profile.getProfileData().getLayoutData().getLayout(this.kit.getName(), this.layout.getName());
         layout.setDisplayName(this.layout.getDisplayName());
         layout.setItems(player.getInventory().getContents());
+        layout.setOffhand(player.getOpenInventory().getTopInventory().getItem(35));
 
         AlleyPlugin.getInstance().getService(LayoutService.class).getLayoutMenu().openMenu(player);
     }

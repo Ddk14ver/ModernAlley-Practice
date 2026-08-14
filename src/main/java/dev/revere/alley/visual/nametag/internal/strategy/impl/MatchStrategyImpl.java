@@ -6,8 +6,10 @@ import dev.revere.alley.visual.nametag.NametagView;
 import dev.revere.alley.visual.nametag.NametagVisibility;
 import dev.revere.alley.visual.nametag.internal.strategy.NametagStrategy;
 import dev.revere.alley.feature.match.Match;
+import dev.revere.alley.feature.match.internal.types.DefaultMatch;
 import dev.revere.alley.feature.match.internal.types.HideAndSeekMatch;
 import dev.revere.alley.feature.match.model.GameParticipant;
+import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.common.text.CC;
 import org.bukkit.ChatColor;
@@ -60,10 +62,15 @@ public class MatchStrategyImpl implements NametagStrategy {
             return null;
         }
 
-        if (match.isInSameTeam(context.getViewer(), context.getTarget())) {
-            return new NametagView(CC.translate(ChatColor.GREEN.toString()), "");
-        } else {
-            return new NametagView(CC.translate(ChatColor.RED.toString()), "");
+        // Color the target by its own team (blue for participant A, red for participant B),
+        // independent of who is viewing, so the in-world nametag and the tablist both show it.
+        if (match instanceof DefaultMatch defaultMatch) {
+            GameParticipant<MatchGamePlayer> targetParticipant = defaultMatch.getParticipant(context.getTarget());
+            if (targetParticipant != null) {
+                ChatColor teamColor = defaultMatch.getTeamColor(targetParticipant);
+                return new NametagView(teamColor.toString(), "");
+            }
         }
+        return null;
     }
 }

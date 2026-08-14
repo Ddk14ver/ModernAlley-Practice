@@ -8,8 +8,7 @@ import dev.revere.alley.common.elo.EloCalculator;
 import dev.revere.alley.common.elo.EloResult;
 import dev.revere.alley.common.elo.OldEloResult;
 import dev.revere.alley.common.logger.Logger;
-import dev.revere.alley.common.reflect.ReflectionService;
-import dev.revere.alley.common.reflect.internal.types.TitleReflectionServiceImpl;
+import dev.revere.alley.common.text.CC;
 import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.VisualsLocaleImpl;
 import dev.revere.alley.core.locale.internal.impl.message.GameMessagesLocaleImpl;
@@ -18,14 +17,23 @@ import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.progress.PlayerProgress;
 import dev.revere.alley.core.profile.progress.ProgressService;
 import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.bot.BotService;
+import dev.revere.alley.feature.challenge.ChallengeService;
+import dev.revere.alley.feature.challenge.ChallengeType;
 import dev.revere.alley.feature.layout.LayoutService;
 import dev.revere.alley.feature.coin.CoinRewardService;
+import dev.revere.alley.feature.division.Division;
+import dev.revere.alley.feature.division.model.DivisionTier;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.raiding.BaseRaidingService;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldOffhand;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingDropItemsImpl;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingRaiding;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingRespawnTimer;
 import dev.revere.alley.feature.layout.data.LayoutData;
+import dev.revere.alley.feature.level.LevelService;
+import dev.revere.alley.feature.level.data.LevelData;
+import dev.revere.alley.feature.leaderboard.LeaderboardService;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.match.model.BaseRaiderRole;
@@ -34,18 +42,22 @@ import dev.revere.alley.feature.match.model.MatchGamePlayerData;
 import dev.revere.alley.feature.match.model.TeamGameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.utility.MatchUtility;
+import dev.revere.alley.feature.match.utility.MatchResultFlight;
 import dev.revere.alley.feature.queue.Queue;
 import lombok.Getter;
 import lombok.Setter;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author Remi
@@ -95,7 +107,7 @@ public class DefaultMatch extends Match {
         this.applyColorKit(player);
 
         Location spawnLocation = this.getParticipantA().containsPlayer(player.getUniqueId()) ? getArena().getPos1() : getArena().getPos2();
-        player.teleport(spawnLocation);
+        player.teleportAsync(spawnLocation);
 
         if (this.getKit().isSettingEnabled(KitSettingRaiding.class)) {
             this.determineRolesAndGiveKit(player);
@@ -159,6 +171,8 @@ public class DefaultMatch extends Match {
 
     @Override
     public void handleRoundEnd() {
+        if (this.deferToPrimaryThread(this::handleRoundEnd)) return;
+
         final boolean teamADead = this.getParticipantA().isAllEliminated() || this.getParticipantA().isAllDead();
         final GameParticipant<MatchGamePlayer> winner = teamADead ? this.getParticipantB() : this.getParticipantA();
         final GameParticipant<MatchGamePlayer> loser = teamADead ? this.getParticipantA() : this.getParticipantB();
@@ -173,6 +187,9 @@ public class DefaultMatch extends Match {
             this.broadcastAndStopSpectating();
         }
 
+        // Chat version coexists with the result-time papers (both are available).
+        // 聊天版与结果阶段的物品版共存（两者都可使用）。
+        MatchUtility.sendPlayAgain(this);
         super.handleRoundEnd();
     }
 
@@ -181,6 +198,9 @@ public class DefaultMatch extends Match {
      * 处理比赛结束时所有面向玩家的消息，包括标题和结果。
      */
     private void broadcastMatchOutcome(GameParticipant<MatchGamePlayer> winner, GameParticipant<MatchGamePlayer> loser) {
+        applyResultFlight(winner, true);
+        applyResultFlight(loser, false);
+
         this.sendVictory(winner);
         this.sendDefeat(loser, winner);
 
@@ -198,8 +218,64 @@ public class DefaultMatch extends Match {
             );
         }
 
+        // Give the Play Again papers right after the result: winner keeps slot 1
+        // (second hotbar slot), loser keeps slot 0. They survive the return-to-lobby
+        // inventory wipe so clicking one queues instantly.
+        // 发布结果后立刻发放"再来一局"纸：胜者占物品栏第2格(1)，败者占第1格(0)。
+        // 返回大厅清空物品栏时纸会被保留，点击即可立即排队。
+        givePlayAgainPapers(winner, loser);
+
         // Start MVP music now, then reveal the MVP after the result title has been visible.
-        this.announceMVP(30L);
+        this.announceMVP(40L);
+    }
+
+    private void applyResultFlight(GameParticipant<MatchGamePlayer> participant, boolean won) {
+        participant.getAllPlayers().forEach(gamePlayer -> {
+            Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class)
+                    .getProfile(gamePlayer.getUuid());
+            if (profile == null) {
+                return;
+            }
+
+            boolean enabled = won
+                    ? profile.getProfileData().getSettingData().isFlyOnWin()
+                    : profile.getProfileData().getSettingData().isFlyOnLoss();
+            if (!enabled) {
+                return;
+            }
+
+            Player player = gamePlayer.getTeamPlayer();
+            if (player != null) {
+                MatchResultFlight.enable(player);
+            }
+        });
+    }
+
+    private void givePlayAgainPapers(GameParticipant<MatchGamePlayer> winner, GameParticipant<MatchGamePlayer> loser) {
+        if (this.getQueue() == null || this.getKit() == null) return;
+
+        // Bot matches never hand out the Play Again paper — the human player returns
+        // straight to the lobby without a requeue shortcut.
+        // Bot对局不发放"再来一局"纸——玩家结束对局后直接返回大厅，无快捷重排。
+        boolean botMatch = this.getParticipants().stream()
+                .flatMap(participant -> participant.getAllPlayers().stream())
+                .map(MatchGamePlayer::getTeamPlayer)
+                .filter(Objects::nonNull)
+                .anyMatch(teamPlayer -> AlleyPlugin.getInstance()
+                        .getService(BotService.class).getSession(teamPlayer) != null);
+        if (botMatch) return;
+
+        org.bukkit.inventory.ItemStack paper = this.createPlayAgainItem();
+
+        Player winnerPlayer = winner.getLeader().getTeamPlayer();
+        if (winnerPlayer != null && winnerPlayer.isOnline()) {
+            winnerPlayer.getInventory().setItem(1, paper.clone());
+        }
+
+        Player loserPlayer = loser.getLeader().getTeamPlayer();
+        if (loserPlayer != null && loserPlayer.isOnline()) {
+            loserPlayer.getInventory().setItem(0, paper.clone());
+        }
     }
 
     /**
@@ -211,11 +287,131 @@ public class DefaultMatch extends Match {
             return;
         }
 
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        Profile winnerProfile = profileService.getProfile(winner.getLeader().getUuid());
+        ChallengeService challengeService = AlleyPlugin.getInstance().getService(ChallengeService.class);
+        challengeService.deferCompletionMessages(winnerProfile);
+
+        try {
+        // Capture the winner's division/level before the stats are applied, so we can announce upgrades.
+        // 在统计生效前记录获胜者的段位/等级，以便播报升级。
+        String oldDivision = winnerProfile == null ? "" : this.divisionKey(winnerProfile);
+        String oldLevel = winnerProfile == null ? "" : this.levelName(winnerProfile);
+
+        // Apply the win/loss & elo updates first so the progress message reflects the new values.
         handleMatchData(winner, loser); // 9 wins, increases to 10, as the player won
         // 9场胜利，增加到10场，因为该玩家获胜了
 
-        if (!this.isRanked()) {
-            this.sendProgressToWinner(winner.getLeader().getTeamPlayer());
+        String newDivision = winnerProfile == null ? "" : this.divisionKey(winnerProfile);
+        String newLevel = winnerProfile == null ? "" : this.levelName(winnerProfile);
+        boolean divisionUpgraded = !oldDivision.equals(newDivision);
+        boolean levelUpgraded = !oldLevel.equals(newLevel);
+
+        // Announce any level/division upgrade above the Progress message, with a level-up sound.
+        // 在 Progress 消息上方播报等级/段位升级结果，并播放升级音效。
+        if (divisionUpgraded || levelUpgraded) {
+            this.sendUpgradeAnnouncement(winner.getLeader().getTeamPlayer(),
+                    divisionUpgraded, newDivision, levelUpgraded, newLevel);
+        }
+
+        // Progress is only announced to the winner. Message order is: Match Results -> [upgrades] -> Progress -> coins.
+        this.sendProgressToWinner(winner.getLeader().getTeamPlayer());
+
+        this.rewardCoins(winner, loser);
+        } finally {
+            challengeService.flushCompletionMessages(winnerProfile);
+        }
+    }
+
+    /**
+     * Gets the readable division key (e.g. "Gold I") of a profile for the current kit.
+     * 获取指定档案在当前套件下的可读段位标识（例如 "Gold I"）。
+     *
+     * @param profile The player's profile.
+     *                玩家的资料。
+     * @return The division name and tier, or an empty string if not available.
+     *         段位名称和层级，若不可用则返回空字符串。
+     */
+    private String divisionKey(Profile profile) {
+        var kitData = profile.getProfileData().getUnrankedKitData().get(this.getKit().getName());
+        if (kitData == null) return "";
+        Division division = kitData.getDivision();
+        if (division == null) return "";
+        DivisionTier tier = kitData.getTier();
+        return division.getName() + " " + (tier == null ? "" : tier.getName());
+    }
+
+    /**
+     * Gets the name of the level a profile currently belongs to based on its global elo.
+     * 根据档案的全局ELO获取其当前所属等级名称。
+     *
+     * @param profile The player's profile.
+     *                玩家的资料。
+     * @return The level name, or an empty string if no level matches.
+     *         等级名称，若无匹配等级则返回空字符串。
+     */
+    private String levelName(Profile profile) {
+        LevelService levelService = AlleyPlugin.getInstance().getService(LevelService.class);
+        LevelData level = levelService.getLevel(profile.getProfileData().getElo());
+        return level == null ? "" : level.getName();
+    }
+
+    /**
+     * Sends the level/division upgrade announcement above the Progress message and plays a level-up sound.
+     * 在 Progress 消息上方发送等级/段位升级公告，并播放升级音效。
+     *
+     * @param player            The winning player.
+     *                          获胜的玩家。
+     * @param divisionUpgraded  Whether the player's division changed.
+     *                          玩家的段位是否发生了变化。
+     * @param newDivision       The new division key.
+     *                          新的段位标识。
+     * @param levelUpgraded     Whether the player's level changed.
+     *                          玩家的等级是否发生了变化。
+     * @param newLevel          The new level name.
+     *                          新的等级名称。
+     */
+    private void sendUpgradeAnnouncement(Player player, boolean divisionUpgraded, String newDivision,
+                                         boolean levelUpgraded, String newLevel) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+
+        List<String> message = new ArrayList<>();
+        if (levelUpgraded) {
+            message.add("&6&lNEW LEVEL &f| &a&lCONGRATULATIONS!");
+            message.add(" &fYou have reached &6" + newLevel + " &fin the global ranking system.");
+        }
+        if (divisionUpgraded) {
+            message.add("&6&lNEW DIVISION &f| &a&lCONGRATULATIONS!");
+            message.add(" &fYou have reached &6" + newDivision + " &fin the division ranking system.");
+        }
+
+        message.forEach(line -> player.sendMessage(CC.translate(line)));
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+    }
+
+    /**
+     * Rewards coins to both participants after the progress message has been sent.
+     * 在进度消息发送之后再发放金币奖励。
+     *
+     * @param winner The winning participant.
+     *               获胜的参赛方。
+     * @param loser  The losing participant.
+     *               失败的参赛方。
+     */
+    private void rewardCoins(GameParticipant<MatchGamePlayer> winner, GameParticipant<MatchGamePlayer> loser) {
+        if (this.isTeamMatch()) {
+            return;
+        }
+
+        CoinRewardService coinReward = AlleyPlugin.getInstance().getService(CoinRewardService.class);
+        if (this.isRanked()) {
+            coinReward.rewardRankedWin(winner.getLeader().getTeamPlayer());
+            coinReward.rewardRankedLoss(loser.getLeader().getTeamPlayer());
+        } else {
+            coinReward.rewardUnrankedWin(winner.getLeader().getTeamPlayer());
+            coinReward.rewardUnrankedLoss(loser.getLeader().getTeamPlayer());
         }
     }
 
@@ -229,10 +425,10 @@ public class DefaultMatch extends Match {
      *               失败的参赛方。
      */
     private void handleMatchData(GameParticipant<MatchGamePlayer> winner, GameParticipant<MatchGamePlayer> loser) {
-        if (this.isTeamMatch()) {
-            return;
-        }
-
+        // Duos (unranked team) matches count toward stats; party/duel/bot/tournament matches all
+        // run with affectStatistics=false and never reach this method.
+        // 双打（非排位团队）比赛计入战绩；派对/约战/机器人/锦标赛比赛均为 affectStatistics=false，
+        // 不会到达此方法。
         if (this.isRanked()) {
             updateRankedStats(winner, loser);
         } else {
@@ -267,22 +463,33 @@ public class DefaultMatch extends Match {
      */
     private void updateUnrankedStats(GameParticipant<MatchGamePlayer> winner, GameParticipant<MatchGamePlayer> loser) {
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        ChallengeService challengeService = AlleyPlugin.getInstance().getService(ChallengeService.class);
+        String kitName = getKit().getName();
 
-        Profile winnerProfile = profileService.getProfile(winner.getLeader().getUuid());
-        var winnerKitData = winnerProfile.getProfileData().getUnrankedKitData().get(getKit().getName());
-        if (winnerKitData != null) winnerKitData.incrementWins();
-        winnerProfile.getProfileData().incrementUnrankedWins();
-        winnerProfile.getProfileData().determineTitles();
+        // Iterate every winning player (solo matches have a single leader, duos have two).
+        // 遍历所有获胜玩家（单打只有队长，双打有两名队员）。
+        for (MatchGamePlayer matchPlayer : winner.getAllPlayers()) {
+            Profile profile = profileService.getProfile(matchPlayer.getUuid());
+            if (profile == null) continue;
 
-        Profile loserProfile = profileService.getProfile(loser.getLeader().getUuid());
-        var loserKitData = loserProfile.getProfileData().getUnrankedKitData().get(getKit().getName());
-        if (loserKitData != null) loserKitData.incrementLosses();
-        loserProfile.getProfileData().incrementUnrankedLosses();
+            var kitData = profile.getProfileData().getUnrankedKitData().get(kitName);
+            if (kitData != null) kitData.incrementWins();
+            AlleyPlugin.getInstance().getService(LeaderboardService.class)
+                    .recordMonthlyUnrankedWin(profile, this.getKit());
+            profile.getProfileData().incrementUnrankedWins();
+            profile.getProfileData().refreshDivision(kitName);
+            profile.getProfileData().determineTitles();
+            challengeService.recordProgress(profile, ChallengeType.WINS, 1);
+        }
 
-        // --- Coin rewards ---
-        CoinRewardService coinReward = AlleyPlugin.getInstance().getService(CoinRewardService.class);
-        coinReward.rewardUnrankedWin(winner.getLeader().getTeamPlayer());
-        coinReward.rewardUnrankedLoss(loser.getLeader().getTeamPlayer());
+        for (MatchGamePlayer matchPlayer : loser.getAllPlayers()) {
+            Profile profile = profileService.getProfile(matchPlayer.getUuid());
+            if (profile == null) continue;
+
+            var kitData = profile.getProfileData().getUnrankedKitData().get(kitName);
+            if (kitData != null) kitData.incrementLosses();
+            profile.getProfileData().incrementUnrankedLosses();
+        }
     }
 
     /**
@@ -305,7 +512,7 @@ public class DefaultMatch extends Match {
             int fadeOut = localeService.getInt(VisualsLocaleImpl.TITLE_MATCH_VICTORY_FADEOUT);
 
             winner.getPlayers().forEach(matchGamePlayer -> {
-                Player player = this.plugin.getServer().getPlayer(matchGamePlayer.getUuid());
+                Player player = matchGamePlayer.getTeamPlayer();
                 if (player != null && player.isOnline()) {
                     sendResultTitle(player, header, footer, fadeIn, stay, fadeOut);
                 }
@@ -332,27 +539,11 @@ public class DefaultMatch extends Match {
             int fadeOut = localeService.getInt(VisualsLocaleImpl.TITLE_MATCH_DEFEAT_FADEOUT);
 
             loser.getPlayers().forEach(matchGamePlayer -> {
-                Player player = this.plugin.getServer().getPlayer(matchGamePlayer.getUuid());
+                Player player = matchGamePlayer.getTeamPlayer();
                 if (player != null && player.isOnline()) {
                     sendResultTitle(player, header, footer, fadeIn, stay, fadeOut);
                 }
             });
-        }
-    }
-
-    private void sendResultTitle(Player player, String header, String footer,
-                                 int fadeIn, int stay, int fadeOut) {
-        Runnable sendTitle = () -> {
-            if (!player.isOnline()) return;
-            this.plugin.getService(ReflectionService.class)
-                    .getReflectionService(TitleReflectionServiceImpl.class)
-                    .sendTitle(player, header, footer, fadeIn, stay, fadeOut);
-        };
-
-        if (player.isDead()) {
-            this.plugin.getServer().getScheduler().runTaskLater(this.plugin, sendTitle, 3L);
-        } else {
-            sendTitle.run();
         }
     }
 
@@ -404,76 +595,74 @@ public class DefaultMatch extends Match {
      *               获胜的玩家。
      */
     public void sendProgressToWinner(Player winner) {
-
-        /*
-         * TODO: Fix this retarded calculation its pmo
-         * 待办：修复这个智障的计算逻辑，太烦人了
-         *  "next thing i know half the core is f---ed" - Titanic Swim Team, Remi (13/07/2025 - 00:37)
-         *  "转眼间半个核心就完蛋了" - Titanic Swim Team, Remi (13/07/2025 - 00:37)
-         */
-
-        Profile winnerProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(winner.getUniqueId());
-        PlayerProgress progress = AlleyPlugin.getInstance().getService(ProgressService.class).calculateProgress(winnerProfile, this.getKit().getName());
-
-        String progressLine;
-
-        if (progress.isMaxRank() && progress.getCurrentWins() >= progress.getWinsForNextTier()) {
-            progressLine = " &6&l● &fCONGRATULATIONS! You have reached the maximum rank!";
-        } else {
-            progressLine = String.format(" &6&l● &fUnlock &6%s &fwith %d more %s!",
-                    progress.getNextRankName(),
-                    progress.getWinsRequired(),
-                    progress.getWinOrWins()
-            );
+        if (winner == null || !winner.isOnline()) {
+            return;
         }
 
-//        Arrays.asList(
-//                "&6&lProgress",
-//                progressLine,
-//                "  &7(" + progress.getProgressBar(12, "■") + "&7) " + progress.getProgressPercentage(),
-//                " &6&l● &fDaily Streak: &6" + "N/A" + " &f(Best: " + "N/A" + ")",
-//                " &6&l● &fWin Streak: &6" + "N/A" + " &f(Best: " + "N/A" + ")",
-//                ""
-//        ).forEach(line -> winner.sendMessage(CC.translate(line)));
+        Profile winnerProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(winner.getUniqueId());
+        if (winnerProfile == null) {
+            return;
+        }
 
-//        LocaleService localeService = this.plugin.getService(LocaleService.class);
-//        if (!localeService.getBoolean(GameMessagesLocaleImpl.MATCH_DIVISION_PROGRESS_ENABLED_BOOLEAN)) {
-//            return;
-//        }
-//
-//        Profile winnerProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(winner.getUniqueId());
-//        PlayerProgress progress = AlleyPlugin.getInstance().getService(ProgressService.class).calculateProgress(winnerProfile, this.getKit().getName());
-//
-//        List<String> message;
-//
-//        DivisionTier reachedTier = AlleyPlugin.getInstance().getService(DivisionService.class).getDivisions().stream()
-//                .flatMap(div -> div.getTiers().stream())
-//                .filter(tier -> tier.getRequiredWins() == progress.getCurrentWins())
-//                .findFirst()
-//                .orElse(null);
-//
-//        if (reachedTier != null) {
-//            message = localeService.getMessageList(GameMessagesLocaleImpl.MATCH_DIVISION_PROGRESS_REACHED_FORMAT)
-//                    .stream()
-//                    .map(line -> line.replace("{reached-new-division}", progress.getNextRankName() + " " + reachedTier.getName()))
-//                    .collect(Collectors.toList());
-//        } else {
-//            message = localeService.getMessageList(GameMessagesLocaleImpl.MATCH_DIVISION_PROGRESS_ONGOING_FORMAT);
-//        }
-//
-//        message.replaceAll(string -> string
-//                .replace("{next-division}", Objects.requireNonNull(reachedTier).getName())
-//                .replace("{wins-required}", String.valueOf(progress.getWinsRequired()))
-//                .replace("{win-or-wins}", progress.getWinOrWins())
-//                .replace("{progress-bar}", progress.getProgressBar(12, "■"))
-//                .replace("{progress-percentage}", progress.getProgressPercentage())
-//                .replace("{daily-streak}", "N/A")
-//                .replace("{best-daily-streak}", "N/A")
-//                .replace("{win-streak}", String.valueOf(winnerProfile.getProfileData().getUnrankedKitData().get(this.getKit().getName()).getWinstreak()))
-//                .replace("{best-win-streak}", "N/A")
-//        );
-//
-//        message.forEach(line -> winner.sendMessage(CC.translate(line)));
+        PlayerProgress progress = AlleyPlugin.getInstance().getService(ProgressService.class)
+                .calculateProgress(winnerProfile, this.getKit().getName());
+
+        List<String> message = new ArrayList<>();
+
+        // Big title.
+        // 大标题。
+        message.add("&6&lProgress");
+
+        // Division progress (unranked wins based).
+        // 段位进度（基于非排位胜场）。
+        if (progress.isMaxRank() && progress.getCurrentWins() >= progress.getWinsForNextTier()) {
+            message.add(" &6&l◼ &fCONGRATULATIONS! You have reached the maximum rank!");
+        } else {
+            message.add(String.format(" &6&l◼ &fUnlock &6%s &fwith %d more %s!",
+                    progress.getNextRankName(),
+                    progress.getWinsRequired(),
+                    progress.getWinOrWins()));
+        }
+        message.add(" &6&l◼ &7(" + progress.getProgressBar(12, "■") + "&7) &f" + progress.getProgressPercentage());
+
+        // Level progress, ranked wins only (placed above the win streak line).
+        // 等级进度，仅排位赛获胜时显示（放在连胜行的上方）。
+        if (this.isRanked()) {
+            int elo = winnerProfile.getProfileData().getElo();
+            LevelService levelService = AlleyPlugin.getInstance().getService(LevelService.class);
+            LevelData currentLevel = levelService.getLevel(elo);
+            LevelData nextLevel = levelService.getNextLevel(elo);
+
+            if (currentLevel != null && nextLevel != null) {
+                int eloRequired = nextLevel.getMinElo() - elo;
+                message.add(" &6&l◼ &fUnlock &6" + nextLevel.getDisplayName() + " &fwith " + eloRequired + " more elos!");
+                message.add(" &6&l◼ &7(" + levelService.getProgressBar(elo) + "&7) &f" + levelService.getProgressDetails(elo));
+            } else if (currentLevel != null) {
+                message.add(" &6&l◼ &fCONGRATULATIONS! You have reached the maximum level!");
+            }
+        }
+
+        // Win streak (current & best).
+        // 连胜（当前及历史最佳）。
+        int winstreak = 0;
+        int bestWinstreak = 0;
+        if (this.isRanked()) {
+            var rankedKitData = winnerProfile.getProfileData().getRankedKitData().get(this.getKit().getName());
+            if (rankedKitData != null) {
+                winstreak = rankedKitData.getWinstreak();
+                bestWinstreak = rankedKitData.getBestWinstreak();
+            }
+        } else {
+            var unrankedKitData = winnerProfile.getProfileData().getUnrankedKitData().get(this.getKit().getName());
+            if (unrankedKitData != null) {
+                winstreak = unrankedKitData.getWinstreak();
+                bestWinstreak = unrankedKitData.getBestWinstreak();
+            }
+        }
+        message.add(" &6&l◼ &fWin Streak: &6" + winstreak + " &f(Best: &6" + bestWinstreak + "&f)");
+        message.add("");
+
+        message.forEach(line -> winner.sendMessage(CC.translate(line)));
     }
 
 
@@ -519,6 +708,7 @@ public class DefaultMatch extends Match {
      */
     public void handleWinner(int elo, GameParticipant<MatchGamePlayer> winner) {
         Profile winnerProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(winner.getLeader().getUuid());
+        int eloGain = Math.max(0, elo - winner.getLeader().getElo());
         var winnerKitData = winnerProfile.getProfileData().getRankedKitData().get(getKit().getName());
         if (winnerKitData != null) {
             winnerKitData.setElo(elo);
@@ -526,8 +716,12 @@ public class DefaultMatch extends Match {
         }
         winnerProfile.getProfileData().incrementRankedWins();
         winnerProfile.getProfileData().updateElo(winnerProfile);
-
-        AlleyPlugin.getInstance().getService(CoinRewardService.class).rewardRankedWin(winner.getLeader().getTeamPlayer());
+        // Ranked wins also advance the kit's division progression.
+        // 排位胜场同样推进该套件的段位进度。
+        winnerProfile.getProfileData().refreshDivision(getKit().getName());
+        ChallengeService challengeService = AlleyPlugin.getInstance().getService(ChallengeService.class);
+        challengeService.recordProgress(winnerProfile, ChallengeType.WINS, 1);
+        challengeService.recordProgress(winnerProfile, ChallengeType.ELO, eloGain);
     }
 
     /**
@@ -548,8 +742,6 @@ public class DefaultMatch extends Match {
         }
         loserProfile.getProfileData().incrementRankedLosses();
         loserProfile.getProfileData().updateElo(loserProfile);
-
-        AlleyPlugin.getInstance().getService(CoinRewardService.class).rewardRankedLoss(loser.getLeader().getTeamPlayer());
     }
 
     @Override
@@ -606,7 +798,9 @@ public class DefaultMatch extends Match {
 
     @Override
     public void handleRespawn(Player player) {
-        player.spigot().respawn();
+        // Party matches keep the victim alive (damage is cancelled before handleDeath),
+        // so guard the respawn packet against alive players to avoid a protocol-error kick.
+        if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, false, true);
     }
 
@@ -682,8 +876,14 @@ public class DefaultMatch extends Match {
             AlleyPlugin.getInstance().getService(LayoutService.class).giveBooks(player, kitToGive.getName());
         } else if (nonNullLayouts.size() == 1) {
             player.getInventory().setContents(nonNullLayouts.get(0).getItems());
+            if (!kitToGive.isSettingEnabled(KitSettingOldOffhand.class)) {
+                player.getInventory().setItemInOffHand(nonNullLayouts.get(0).getOffhand());
+            }
         } else {
             player.getInventory().setContents(kitToGive.getItems());
+            if (!kitToGive.isSettingEnabled(KitSettingOldOffhand.class)) {
+                player.getInventory().setItemInOffHand(kitToGive.getOffhand());
+            }
         }
 
         player.getInventory().setArmorContents(kitToGive.getArmor());

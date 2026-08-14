@@ -9,7 +9,6 @@ import org.bukkit.persistence.PersistentDataType;
 public final class LegacyProjectileData {
     private static final NamespacedKey LEGACY_PROJECTILE = new NamespacedKey(AlleyPlugin.getInstance(), "legacy_projectile");
     private static final NamespacedKey PUNCH_LEVEL = new NamespacedKey(AlleyPlugin.getInstance(), "legacy_punch_level");
-    private static final NamespacedKey BOW_FORCE = new NamespacedKey(AlleyPlugin.getInstance(), "legacy_bow_force");
     private static final NamespacedKey POWER_LEVEL = new NamespacedKey(AlleyPlugin.getInstance(), "legacy_power_level");
 
     private LegacyProjectileData() {
@@ -25,10 +24,8 @@ public final class LegacyProjectileData {
         projectile.getPersistentDataContainer().set(PUNCH_LEVEL, PersistentDataType.INTEGER, Math.max(0, punchLevel));
     }
 
-    public static void markArrow(Projectile arrow, int punchLevel, int powerLevel, float force) {
+    public static void markArrow(Projectile arrow, int punchLevel, int powerLevel) {
         mark(arrow, punchLevel);
-        arrow.getPersistentDataContainer().set(BOW_FORCE, PersistentDataType.DOUBLE,
-                Math.max(0.0, Math.min(1.0, force)));
         arrow.getPersistentDataContainer().set(POWER_LEVEL, PersistentDataType.INTEGER, Math.max(0, powerLevel));
     }
 
@@ -39,11 +36,6 @@ public final class LegacyProjectileData {
     public static int getPunchLevel(Projectile projectile) {
         Integer punchLevel = projectile.getPersistentDataContainer().get(PUNCH_LEVEL, PersistentDataType.INTEGER);
         return punchLevel == null ? 0 : punchLevel;
-    }
-
-    public static double getBowForce(Projectile arrow) {
-        Double force = arrow.getPersistentDataContainer().get(BOW_FORCE, PersistentDataType.DOUBLE);
-        return force == null ? 1.0 : force;
     }
 
     public static int getPowerLevel(Projectile arrow) {

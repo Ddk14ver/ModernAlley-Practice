@@ -8,11 +8,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project Alley
- * 项目：Alley
  * @date 6/2/2024
- * 日期：6/2/2024
  */
 public class DivisionsCommand extends BaseCommand {
     @CommandData(

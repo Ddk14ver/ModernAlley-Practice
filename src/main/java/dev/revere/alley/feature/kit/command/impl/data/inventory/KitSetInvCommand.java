@@ -46,6 +46,7 @@ public class KitSetInvCommand extends BaseCommand {
 
         kit.setItems(inventory);
         kit.setArmor(armor);
+        kit.setOffhand(player.getInventory().getItemInOffHand());
         kitService.saveKit(kit);
 
         // Clear all saved layouts for this kit across all players —

@@ -13,11 +13,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者 Emmy
  * @project Alley
- * 项目 Alley
  * @date 15/09/2024 - 11:39
- * 日期 2024年9月15日 - 11:39
  */
 public class MatchInfoCommand extends BaseCommand {
     @CommandData(

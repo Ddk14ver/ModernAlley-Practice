@@ -12,11 +12,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者 Emmy
  * @project Alley
- * 项目 Alley
  * @since 26/06/2025
- * 自 2025年6月26日起
  */
 public class ViewPlayersCommand extends BaseCommand {
     @CommandData(

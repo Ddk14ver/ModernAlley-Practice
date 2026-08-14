@@ -1,6 +1,8 @@
 package dev.revere.alley.feature.knockback.data;
 
 import org.bukkit.util.Vector;
+
+import java.util.UUID;
 /**
  * @author Ddk1 ClaudeCode
  * @project Alley
@@ -14,16 +16,20 @@ public class PlayerKnockbackData {
     private double lastGroundY;
     private boolean onGround;
     private String profileName;
-    private int configuredHitDelay = -1;
-    private long lastAcceptedCombatHitTick = Long.MIN_VALUE;
-    private long lastHazardDamageTick = Long.MIN_VALUE;
-    private long lastFireHazardPreparationTick = Long.MIN_VALUE;
-    private long lastPoisonHazardPreparationTick = Long.MIN_VALUE;
+    private int configuredHitDelayWindow = -1;
     private boolean serverSideHit;
-    private Vector legacyResidualVelocity;
-    private long legacyResidualTick;
-    private boolean pendingLegacyResidual;
+    private boolean serverControlled;
+    private boolean captureServerControlledVelocity;
+    private Vector serverControlledVelocity;
     private long pendingNativeProjectileVelocityTick = Long.MIN_VALUE;
+    private boolean suppressLegacyPearlVelocity;
+    private boolean legacyDamageWindowActive;
+    private long legacyDamageWindowTick = Long.MIN_VALUE;
+    private long lastKnockbackApplicationTick = Long.MIN_VALUE;
+    private Vector lastAppliedKnockbackVelocity;
+    private long legacyDamageSupplementTick = Long.MIN_VALUE;
+    private UUID legacyDamageSupplementSource;
+    private UUID legacyDamageSupplementAttacker;
 
     public Vector getVelocity() { return velocity; }
     public void setVelocity(Vector v) { this.velocity = v; }
@@ -40,41 +46,70 @@ public class PlayerKnockbackData {
     public String getProfileName() { return profileName; }
     public void setProfileName(String n) { this.profileName = n; }
 
-    public int getConfiguredHitDelay() { return configuredHitDelay; }
-    public void setConfiguredHitDelay(int hitDelay) { this.configuredHitDelay = hitDelay; }
-
-    public long getLastAcceptedCombatHitTick() { return lastAcceptedCombatHitTick; }
-    public void setLastAcceptedCombatHitTick(long tick) { this.lastAcceptedCombatHitTick = tick; }
-
-    public long getLastHazardDamageTick() { return lastHazardDamageTick; }
-    public void setLastHazardDamageTick(long tick) { this.lastHazardDamageTick = tick; }
-
-    public long getLastFireHazardPreparationTick() { return lastFireHazardPreparationTick; }
-    public void setLastFireHazardPreparationTick(long tick) { this.lastFireHazardPreparationTick = tick; }
-
-    public long getLastPoisonHazardPreparationTick() { return lastPoisonHazardPreparationTick; }
-    public void setLastPoisonHazardPreparationTick(long tick) { this.lastPoisonHazardPreparationTick = tick; }
+    public int getConfiguredHitDelayWindow() { return configuredHitDelayWindow; }
+    public void setConfiguredHitDelayWindow(int hitDelayWindow) { this.configuredHitDelayWindow = hitDelayWindow; }
 
     public boolean isServerSideHit() { return serverSideHit; }
     public void setServerSideHit(boolean s) { this.serverSideHit = s; }
 
-    public Vector getLegacyResidualVelocity() { return legacyResidualVelocity; }
-    public void setLegacyResidualVelocity(Vector velocity) { this.legacyResidualVelocity = velocity; }
+    public boolean isServerControlled() { return serverControlled; }
+    public void setServerControlled(boolean serverControlled) { this.serverControlled = serverControlled; }
 
-    public long getLegacyResidualTick() { return legacyResidualTick; }
-    public void setLegacyResidualTick(long tick) { this.legacyResidualTick = tick; }
+    public boolean isCaptureServerControlledVelocity() { return captureServerControlledVelocity; }
+    public void setCaptureServerControlledVelocity(boolean capture) { this.captureServerControlledVelocity = capture; }
 
-    public boolean isPendingLegacyResidual() { return pendingLegacyResidual; }
-    public void setPendingLegacyResidual(boolean pending) { this.pendingLegacyResidual = pending; }
+    public void setServerControlledVelocity(Vector velocity) { this.serverControlledVelocity = velocity; }
+    public Vector consumeServerControlledVelocity() {
+        Vector velocity = this.serverControlledVelocity;
+        this.serverControlledVelocity = null;
+        return velocity;
+    }
 
     public long getPendingNativeProjectileVelocityTick() { return pendingNativeProjectileVelocityTick; }
     public void setPendingNativeProjectileVelocityTick(long tick) { this.pendingNativeProjectileVelocityTick = tick; }
     public void clearPendingNativeProjectileVelocity() { this.pendingNativeProjectileVelocityTick = Long.MIN_VALUE; }
 
-    public void clearLegacyResidual() {
-        this.legacyResidualVelocity = null;
-        this.legacyResidualTick = 0L;
-        this.pendingLegacyResidual = false;
+    public boolean isSuppressLegacyPearlVelocity() { return suppressLegacyPearlVelocity; }
+    public void setSuppressLegacyPearlVelocity(boolean suppress) { this.suppressLegacyPearlVelocity = suppress; }
+
+    public boolean isLegacyDamageWindowActive(long tick) {
+        return legacyDamageWindowActive && legacyDamageWindowTick == tick;
+    }
+    public void setLegacyDamageWindowActive(boolean active, long tick) {
+        this.legacyDamageWindowActive = active;
+        this.legacyDamageWindowTick = tick;
+    }
+
+    public long getLastKnockbackApplicationTick() { return lastKnockbackApplicationTick; }
+    public void setLastKnockbackApplicationTick(long tick) { this.lastKnockbackApplicationTick = tick; }
+    public Vector getLastAppliedKnockbackVelocity() { return lastAppliedKnockbackVelocity; }
+    public void setLastAppliedKnockbackVelocity(Vector velocity) {
+        this.lastAppliedKnockbackVelocity = velocity == null ? null : velocity.clone();
+    }
+
+    public long getLegacyDamageSupplementTick() { return legacyDamageSupplementTick; }
+    public UUID getLegacyDamageSupplementSource() { return legacyDamageSupplementSource; }
+    public UUID getLegacyDamageSupplementAttacker() { return legacyDamageSupplementAttacker; }
+    public void markLegacyDamageSupplement(long tick, UUID source, UUID attacker) {
+        this.legacyDamageSupplementTick = tick;
+        this.legacyDamageSupplementSource = source;
+        this.legacyDamageSupplementAttacker = attacker;
+    }
+    public void clearLegacyDamageSupplement() {
+        this.legacyDamageSupplementTick = Long.MIN_VALUE;
+        this.legacyDamageSupplementSource = null;
+        this.legacyDamageSupplementAttacker = null;
+    }
+
+    public void clearLegacyState() {
         this.pendingNativeProjectileVelocityTick = Long.MIN_VALUE;
+        this.suppressLegacyPearlVelocity = false;
+        this.captureServerControlledVelocity = false;
+        this.serverControlledVelocity = null;
+        this.legacyDamageWindowActive = false;
+        this.legacyDamageWindowTick = Long.MIN_VALUE;
+        this.lastKnockbackApplicationTick = Long.MIN_VALUE;
+        this.lastAppliedKnockbackVelocity = null;
+        clearLegacyDamageSupplement();
     }
 }

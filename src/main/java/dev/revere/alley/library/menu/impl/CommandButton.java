@@ -11,11 +11,8 @@ import java.util.List;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 15/06/2024 - 23:57
- * 日期：15/06/2024 - 23:57
  */
 @AllArgsConstructor
 public class CommandButton extends Button {

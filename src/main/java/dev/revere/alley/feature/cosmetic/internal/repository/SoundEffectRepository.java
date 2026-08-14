@@ -6,11 +6,8 @@ import lombok.Getter;
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 01/06/2024
- * 日期 01/06/2024
  */
 @Getter
 public class SoundEffectRepository extends BaseCosmeticRepository<BaseSoundEffect> {

@@ -11,11 +11,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 5/21/2024
- * 日期 2024年5月21日
  */
 public class LeaveSpectatorCommand extends BaseCommand {
     @CommandData(

@@ -11,13 +11,10 @@ import dev.revere.alley.feature.title.model.TitleRecord;
 import dev.revere.alley.feature.match.data.MatchData;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.data.types.*;
-import dev.revere.alley.common.text.CC;
 import lombok.Getter;
 import lombok.Setter;
-import org.bukkit.Bukkit;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -34,11 +31,15 @@ public class ProfileData {
     private Map<String, ProfileRankedKitData> rankedKitData;
     private Map<String, ProfileFFAData> ffaData;
 
+    /** Tournament wins per kit — counts toward division progression for that kit. */
+    private Map<String, Integer> tournamentKitWins;
+
     private ProfileLayoutData layoutData;
     private ProfileSettingData settingData;
     private ProfileCosmeticData cosmeticData;
     private ProfilePlayTimeData playTimeData;
     private ProfileMusicData musicData;
+    private ProfileChallengeData challengeData;
 
     private List<MatchData> previousMatches;
 
@@ -90,6 +91,7 @@ public class ProfileData {
         this.playTimeData = new ProfilePlayTimeData();
         this.layoutData = new ProfileLayoutData();
         this.musicData = new ProfileMusicData();
+        this.challengeData = new ProfileChallengeData();
     }
 
     private void feedDataClasses() {
@@ -113,6 +115,7 @@ public class ProfileData {
         this.unrankedKitData = Maps.newHashMap();
         this.rankedKitData = Maps.newHashMap();
         this.ffaData = Maps.newHashMap();
+        this.tournamentKitWins = Maps.newHashMap();
     }
 
     /**
@@ -164,41 +167,74 @@ public class ProfileData {
     }
 
     /**
-     * Updates the elo and division of the player
-     * 更新玩家的ELO分数和段位。
+     * Updates the elo of the player.
+     * The level-up announcement itself is handled by the match-end flow (see DefaultMatch).
+     * 更新玩家的ELO分数。
+     * 升级公告本身由对局结束流程处理（见 DefaultMatch）。
      *
      * @param profile the profile of the player
      *               玩家的资料。
      */
     public void updateElo(Profile profile) {
-        int previousElo = this.elo;
-        LevelService levelService = AlleyPlugin.getInstance().getService(LevelService.class);
-        String previousLevel = levelService.getLevel(previousElo).getName();
-
         this.elo = this.calculateGlobalElo(profile);
-        String newLevel = levelService.getLevel(this.elo).getName();
+    }
 
-        if (!newLevel.equals(previousLevel)) {
-            this.sendLevelUpMessage(profile, newLevel);
+    /**
+     * Gets the total number of wins a player has for a given kit across every mode
+     * (unranked solo/duo, ranked and tournament). This total drives division progression.
+     * 获取玩家在指定套件下所有模式（非排位单打/双打、排位、锦标赛）的总胜场数。
+     * 该总数用于驱动段位进度。
+     *
+     * @param kitName The name of the kit.
+     *                套件的名称。
+     * @return The combined win count across all modes for the kit.
+     *         该套件在所有模式下的胜场总数。
+     */
+    public int getKitWins(String kitName) {
+        ProfileUnrankedKitData unranked = this.unrankedKitData.get(kitName);
+        int unrankedWins = unranked == null ? 0 : unranked.getWins();
+        ProfileRankedKitData ranked = this.rankedKitData.get(kitName);
+        int rankedWins = ranked == null ? 0 : ranked.getWins();
+        int tournamentWins = this.tournamentKitWins.getOrDefault(kitName, 0);
+        return unrankedWins + rankedWins + tournamentWins;
+    }
+
+    /**
+     * Recomputes the stored division/tier of a kit from its combined win count.
+     * Should be called after any win that affects the kit (unranked solo/duo, ranked, tournament).
+     * 根据套件的总胜场数重新计算存储的段位/层级。
+     * 应在任何影响该套件的胜利之后调用（非排位单打/双打、排位、锦标赛）。
+     *
+     * @param kitName The name of the kit.
+     *                套件的名称。
+     */
+    public void refreshDivision(String kitName) {
+        ProfileUnrankedKitData kitData = this.unrankedKitData.get(kitName);
+        if (kitData != null) {
+            kitData.determineDivision(this.getKitWins(kitName));
         }
     }
 
     /**
-     * Sends a level up message to the player
-     * 向玩家发送升级消息。
+     * Recomputes the stored division/tier for every kit from combined win counts.
+     * Used when a profile is loaded so the stored division reflects all modes immediately.
+     * 在加载玩家资料时，为所有套件重新计算段位/层级。
      *
-     * @param profile  the profile of the player
-     *                 玩家的资料。
-     * @param newLevel the new level of the player
-     *                 玩家的新等级。
      */
-    private void sendLevelUpMessage(Profile profile, String newLevel) {
-        Arrays.asList(
-                "",
-                "&6&lNEW LEVEL &f| &a&lCONGRATULATIONS!",
-                " &fYou have reached &6" + newLevel + " &fin the global ranking system.",
-                ""
-        ).forEach(line -> Bukkit.getPlayer(profile.getUuid()).sendMessage(CC.translate(line)));
+    public void refreshAllDivisions() {
+        this.unrankedKitData.keySet().forEach(this::refreshDivision);
+    }
+
+    /**
+     * Records a tournament win for a kit and refreshes that kit's division.
+     * 记录某套件的锦标赛胜场，并刷新该套件的段位。
+     *
+     * @param kitName The name of the kit the tournament was played with.
+     *                锦标赛所使用的套件名称。
+     */
+    public void incrementTournamentKitWins(String kitName) {
+        this.tournamentKitWins.merge(kitName, 1, Integer::sum);
+        this.refreshDivision(kitName);
     }
 
     /**

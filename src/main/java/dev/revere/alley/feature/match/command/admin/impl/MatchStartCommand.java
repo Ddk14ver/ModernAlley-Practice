@@ -19,11 +19,8 @@ import java.util.List;
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 5/26/2024
- * 日期 2024年5月26日
  */
 public class MatchStartCommand extends BaseCommand {
     @CompleterData(name = "match.start")

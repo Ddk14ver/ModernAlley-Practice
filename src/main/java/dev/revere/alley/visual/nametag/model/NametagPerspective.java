@@ -61,7 +61,8 @@ public class NametagPerspective {
         if (newView == null) return;
 
         NametagAdapter previousAdapter = displayedAdapters.get(target.getUniqueId());
-        if (previousAdapter != null && previousAdapter.represents(newView)) {
+        if (previousAdapter != null && previousAdapter.represents(newView)
+                && hasLiveTeamEntry(previousAdapter, target)) {
             return;
         }
 
@@ -79,6 +80,12 @@ public class NametagPerspective {
         newAdapter.addPlayer(target, this.viewer);
 
         displayedAdapters.put(target.getUniqueId(), newAdapter);
+    }
+
+    private boolean hasLiveTeamEntry(NametagAdapter adapter, Player target) {
+        if (viewer.getScoreboard() == null) return false;
+        org.bukkit.scoreboard.Team team = viewer.getScoreboard().getTeam(adapter.getName());
+        return team != null && team.hasEntry(target.getName());
     }
 
     private NametagView determineView(NametagContext context) {

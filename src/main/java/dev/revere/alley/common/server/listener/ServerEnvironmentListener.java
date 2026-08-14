@@ -4,6 +4,7 @@ import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.Profile;
 import org.bukkit.Difficulty;
+import org.bukkit.GameRule;
 import org.bukkit.Material;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
@@ -13,7 +14,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.*;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.ExplosionPrimeEvent;
-import org.bukkit.event.player.PlayerEggThrowEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.weather.WeatherChangeEvent;
 import org.bukkit.event.world.ChunkUnloadEvent;
@@ -66,42 +66,21 @@ public class ServerEnvironmentListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onCreatureSpawn(CreatureSpawnEvent event) {
-        if (event.getEntityType() == EntityType.ENDERMITE
-                && event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.ENDER_PEARL) {
-            event.setCancelled(true);
-            return;
-        }
-        if (event.getEntityType() == EntityType.CHICKEN
-                && (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.EGG
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.DISPENSE_EGG)) {
-            event.setCancelled(true);
-            return;
-        }
-
-        // Only block natural spawning — allow plugin-triggered spawns
-        // (ender crystals, kill-effect entities, etc.)
-        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.NATURAL
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CHUNK_GEN
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.VILLAGE_INVASION
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.PATROL
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SLIME_SPLIT
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.NETHER_PORTAL
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.JOCKEY
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.BEEHIVE
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.DROWNED
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SILVERFISH_BLOCK
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.TRIAL_SPAWNER
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.OCELOT_BABY
-                || event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.REINFORCEMENTS) {
+        // Block world-driven mob generation, while preserving explicit plugin,
+        // command, spawner and spawn-egg/breeding sources.
+        CreatureSpawnEvent.SpawnReason reason = event.getSpawnReason();
+        if (reason == CreatureSpawnEvent.SpawnReason.NATURAL
+                || reason == CreatureSpawnEvent.SpawnReason.CHUNK_GEN
+                || reason == CreatureSpawnEvent.SpawnReason.VILLAGE_INVASION
+                || reason == CreatureSpawnEvent.SpawnReason.PATROL
+                || reason == CreatureSpawnEvent.SpawnReason.NETHER_PORTAL
+                || reason == CreatureSpawnEvent.SpawnReason.JOCKEY
+                || reason == CreatureSpawnEvent.SpawnReason.OCELOT_BABY
+                || reason == CreatureSpawnEvent.SpawnReason.REINFORCEMENTS
+                || reason == CreatureSpawnEvent.SpawnReason.RAID
+                || reason == CreatureSpawnEvent.SpawnReason.TRAP) {
             event.setCancelled(true);
         }
-        // SpawnReason.CUSTOM, DEFAULT, SPAWNER_EGG, COMMAND, etc. are allowed
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST)
-    private void onEggThrow(PlayerEggThrowEvent event) {
-        event.setHatching(false);
-        event.setNumHatches((byte) 0);
     }
 
     @EventHandler
@@ -111,8 +90,8 @@ public class ServerEnvironmentListener implements Listener {
 
     @EventHandler
     private void onWorldLoad(WorldLoadEvent event) {
-        event.getWorld().getEntities().clear();
         event.getWorld().setDifficulty(Difficulty.HARD);
+        event.getWorld().setGameRule(GameRule.DO_MOB_SPAWNING, false);
     }
 
     @EventHandler

@@ -1,12 +1,10 @@
 package dev.revere.alley.feature.cosmetic.preview;
 
 import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.feature.bot.entity.NativeBotPlayer;
 import dev.revere.alley.feature.cosmetic.internal.repository.impl.killeffect.BaseKillEffect;
-import net.citizensnpcs.api.CitizensAPI;
-import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.EntityEffect;
 import org.bukkit.Location;
-import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -14,26 +12,30 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-final class CitizensKillEffectPreview {
+final class NativeKillEffectPreview {
     private static final Map<UUID, Session> SESSIONS = new ConcurrentHashMap<>();
 
-    private CitizensKillEffectPreview() {
+    private NativeKillEffectPreview() {
     }
 
     static boolean start(Player viewer, BaseKillEffect effect, Location location, Runnable completion) {
-        NPC npc = CitizensAPI.getNPCRegistry().createNPC(EntityType.PLAYER, "Preview Dummy");
-        npc.setProtected(true);
-        if (!npc.spawn(location)) {
-            npc.destroy();
+        if (!NativeBotPlayer.isSupported()) return false;
+
+        NativeBotPlayer dummy;
+        try {
+            dummy = NativeBotPlayer.spawn(location, "PreviewDummy", 0);
+        } catch (RuntimeException exception) {
             return false;
         }
+        Player dummyPlayer = dummy.player();
+        dummyPlayer.setInvulnerable(true);
 
         UUID viewerId = viewer.getUniqueId();
         BukkitTask deathTask = AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(
                 AlleyPlugin.getInstance(), () -> {
-                    if (!viewer.isOnline() || !npc.isSpawned() || !(npc.getEntity() instanceof Player dummy)) return;
-                    dummy.playEffect(EntityEffect.DEATH);
-                    effect.execute(dummy);
+                    if (!viewer.isOnline() || !dummy.isSpawned()) return;
+                    dummyPlayer.playEffect(EntityEffect.DEATH);
+                    effect.execute(dummyPlayer);
                 }, 10L);
 
         BukkitTask cleanupTask = AlleyPlugin.getInstance().getServer().getScheduler().runTaskLater(
@@ -44,7 +46,7 @@ final class CitizensKillEffectPreview {
                     completion.run();
                 }, 110L);
 
-        SESSIONS.put(viewerId, new Session(npc, deathTask, cleanupTask));
+        SESSIONS.put(viewerId, new Session(dummy, deathTask, cleanupTask));
         return true;
     }
 
@@ -57,19 +59,18 @@ final class CitizensKillEffectPreview {
     }
 
     private static final class Session {
-        private final NPC npc;
+        private final NativeBotPlayer dummy;
         private final BukkitTask deathTask;
         private final BukkitTask cleanupTask;
 
-        private Session(NPC npc, BukkitTask deathTask, BukkitTask cleanupTask) {
-            this.npc = npc;
+        private Session(NativeBotPlayer dummy, BukkitTask deathTask, BukkitTask cleanupTask) {
+            this.dummy = dummy;
             this.deathTask = deathTask;
             this.cleanupTask = cleanupTask;
         }
 
         private void destroyNpc() {
-            if (npc.isSpawned()) npc.despawn();
-            npc.destroy();
+            dummy.remove();
         }
     }
 }

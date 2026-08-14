@@ -52,6 +52,20 @@ game:
   # the amount of lives each player will have (such as pearlfight)
   lives-per-game: 3
 
+events:
+  # Maximum number of events that can be active or waiting in the host queue.
+  queue-limit: 9
+  # Maximum number of players that can join an event.
+  max-players: 32
+  # Time players have to join the active event before it starts.
+  start-countdown-seconds: 60
+
+leaderboards:
+  # Calendar timezone used to decide when the monthly leaderboard rolls over.
+  timezone: "Asia/Hong_Kong"
+  # Reload persisted rankings so recently-offline players remain visible.
+  database-refresh-minutes: 5
+
 permissions:
   syntax-bypass-permission: alley.syntax.bypass
   color-code-usage-permission: alley.chat.color

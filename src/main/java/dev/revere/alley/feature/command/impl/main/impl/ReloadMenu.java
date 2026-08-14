@@ -28,7 +28,12 @@ public final class ReloadMenu extends Menu {
     static {
         OPTIONS.add(new ReloadOption(Material.BOOK, "&e&lConfig Files",
                 Arrays.asList("&7Reload all YAML configs:", "&7messages, settings, menus, etc."),
-                p -> AlleyPlugin.getInstance().getService(ConfigService.class).reloadConfigs()));
+                p -> {
+                    AlleyPlugin.getInstance().getService(ConfigService.class).reloadConfigs();
+                    AlleyPlugin.getInstance()
+                            .getService(dev.revere.alley.feature.challenge.ChallengeService.class)
+                            .reloadDefinitions();
+                }));
         OPTIONS.add(new ReloadOption(Material.DIAMOND_SWORD, "&6&lQueues",
                 Arrays.asList("&7Rebuild ranked/unranked/duos", "&7queues from current kits."),
                 p -> AlleyPlugin.getInstance()

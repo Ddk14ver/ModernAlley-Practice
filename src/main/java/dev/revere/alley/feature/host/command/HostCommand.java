@@ -12,11 +12,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 08/06/2024 - 21:31
- * 日期：2024年6月8日 - 21:31
  */
 public class HostCommand extends BaseCommand {
     @CommandData(

@@ -21,11 +21,8 @@ import java.util.Map;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 22/10/2024 - 18:18
- * 日期：2024年10月22日 - 18:18
  */
 public class DuelRequestsMenu extends PaginatedMenu {
     protected final AlleyPlugin plugin = AlleyPlugin.getInstance();

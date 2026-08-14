@@ -10,6 +10,7 @@ import dev.revere.alley.feature.kit.setting.KitSetting;
 import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldHitDelay;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingPearlCooldownImpl;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingBotQueue;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.library.menu.Button;
 import dev.revere.alley.library.menu.pagination.PaginatedMenu;
 import lombok.AllArgsConstructor;
@@ -100,7 +101,10 @@ public class KitSettingsMenu extends PaginatedMenu {
             lore.add(CC.MENU_BAR);
             lore.add("&7Description: &f" + this.setting.getDescription());
             lore.add("&7Status: " + (enabled ? "&aEnabled" : "&cDisabled"));
-            if (this.setting instanceof KitSettingPearlCooldownImpl) {
+            if (this.setting instanceof KitSettingOldHitDelay) {
+                int window = enabled ? this.setting.getValue() : KitSettingOldHitDelay.DEFAULT_DELAY;
+                lore.add("&7NMS Window: &f" + window + " &8(~" + ((window + 1) / 2) + " server ticks)");
+            } else if (this.setting instanceof KitSettingPearlCooldownImpl) {
                 lore.add("&7Value: &f" + this.setting.getValue() + " seconds");
             } else if (this.setting instanceof KitSettingBotQueue) {
                 lore.add("&7AI Mode: &f" + this.kit.getBotAiMode().name());
@@ -142,13 +146,20 @@ public class KitSettingsMenu extends PaginatedMenu {
             }
             if (clickType == ClickType.LEFT) {
                 this.setting.setEnabled(!this.setting.isEnabled());
+                if (this.setting instanceof KitSettingOldHitDelay && this.setting.isEnabled()) {
+                    AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                            .synchronizeKitHitDelay(this.kit);
+                }
                 AlleyPlugin.getInstance().getService(KitService.class).saveKit(this.kit);
                 player.sendMessage(CC.translate("&aSetting &6" + this.setting.getName() + " &aset to &6" + this.setting.isEnabled() + " &afor kit &6" + this.kit.getName() + "&a."));
                 new KitSettingsMenu(this.kit).openMenu(player);
                 this.playSuccess(player);
             } else if (clickType == ClickType.RIGHT) {
                 player.closeInventory();
-                player.sendMessage(CC.translate("&eUse &6/kit setsetting " + this.kit.getName() + " " + this.setting.getName() + " <value> &eto adjust."));
+                String valueName = this.setting instanceof KitSettingOldHitDelay
+                        ? "<NMS-window-value>" : "<value>";
+                player.sendMessage(CC.translate("&eUse &6/kit setsetting " + this.kit.getName()
+                        + " " + this.setting.getName() + " " + valueName + " &eto adjust."));
                 this.playNeutral(player);
             }
         }
@@ -185,6 +196,8 @@ public class KitSettingsMenu extends PaginatedMenu {
                 }
                 setting.setEnabled(true);
             }
+            AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                    .synchronizeKitHitDelay(this.kit);
             AlleyPlugin.getInstance().getService(KitService.class).saveKit(this.kit);
             player.sendMessage(CC.translate("&aAll settings enabled for kit &6" + this.kit.getName() + "&a."));
             new KitSettingsMenu(this.kit).openMenu(player);

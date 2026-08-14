@@ -6,10 +6,9 @@ import dev.revere.alley.feature.bot.internal.BotServiceImpl;
 import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.match.internal.types.GomokuItems;
 import dev.revere.alley.feature.knockback.KnockbackManager;
-import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import lombok.RequiredArgsConstructor;
-import net.citizensnpcs.api.event.NPCDeathEvent;
 import org.bukkit.Material;
+import org.bukkit.Bukkit;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EnderPearl;
@@ -29,11 +28,11 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.projectiles.ProjectileSource;
+import org.bukkit.util.Vector;
 
 @RequiredArgsConstructor
 public class BotMatchListener implements Listener {
@@ -54,6 +53,16 @@ public class BotMatchListener implements Listener {
             return;
         }
 
+        if (event.getEntity() instanceof Player victim) {
+            KnockbackManager knockbackManager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+            if (!knockbackManager.isKnockbackApplied(victim, session.getKit())) {
+                knockbackManager.applyKnockback(victim, session.getKit());
+            }
+            if (session.getBotId() != null && victim.getUniqueId().equals(session.getBotId())) {
+                knockbackManager.updateMovementState(victim);
+            }
+        }
+
         if (event instanceof EntityDamageByEntityEvent damageByEntity) {
             Entity attacker = resolveAttacker(damageByEntity.getDamager());
             boolean pearlSelfDamage = damageByEntity.getDamager() instanceof EnderPearl
@@ -70,42 +79,29 @@ public class BotMatchListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onAcceptedBotMeleeDamage(EntityDamageByEntityEvent event) {
-        if (!(event.getEntity() instanceof Player victim)
-                || !(event.getDamager() instanceof Player attacker)) return;
+    public void onAcceptedBotAttack(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player attacker)) return;
+
+        BotMatchSession session = service.getSession(attacker);
+        if (session == null || session.getBotId() == null
+                || !attacker.getUniqueId().equals(session.getBotId())) return;
+        session.confirmBotAttack();
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onAcceptedBotDamage(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) return;
 
         BotMatchSession session = service.getSession(victim);
-        if (session == null || !session.isRunning() || session.isEnded()
-                || session.getBotId() == null
-                || !victim.getUniqueId().equals(session.getBotId())
-                || !attacker.getUniqueId().equals(session.getPlayerId())) return;
-
-        session.markIncomingMeleeKnockback();
-        KnockbackManager knockbackManager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
-        PlayerKnockbackData knockbackData = knockbackManager.getPlayerData(victim);
-        if (knockbackData.getVelocity() != null) {
-            knockbackData.setVelocity(session.applyCombatInputKnockbackReduction(knockbackData.getVelocity()));
-        }
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBotVelocity(PlayerVelocityEvent event) {
-        BotMatchSession session = service.getSession(event.getPlayer());
         if (session == null || session.isEnded() || session.getBotId() == null
-                || !event.getPlayer().getUniqueId().equals(session.getBotId())) return;
+                || !victim.getUniqueId().equals(session.getBotId())) return;
 
-        event.setVelocity(session.applyCombatInputKnockbackReduction(event.getVelocity()));
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onBotDeath(NPCDeathEvent event) {
-        if (!(event.getEvent().getEntity() instanceof Player deadBot)) return;
-        BotMatchSession session = service.getSession(deadBot);
-        if (session == null || session.isEnded()) return;
-
-        event.getDrops().clear();
-        event.setDroppedExp(0);
-        session.handleNaturalDeath(deadBot);
+        Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+            if (session.isEnded() || !victim.isValid() || victim.isDead()) return;
+            Vector applied = AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                    .deliverPendingKnockback(victim);
+            if (applied != null) session.handleKnockbackApplied(applied, "manager-tick");
+        });
     }
 
     private Entity resolveAttacker(Entity damager) {

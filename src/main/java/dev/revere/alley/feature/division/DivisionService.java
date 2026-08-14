@@ -6,11 +6,8 @@ import java.util.List;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project alley-practice
- * 项目：alley-practice
  * @date 2/07/2025
- * 日期：2/07/2025
  */
 public interface DivisionService extends Service {
     /**

@@ -13,11 +13,8 @@ import java.util.Arrays;
 
 /**
  * @author Emmy
- * 作者: Emmy
  * @project Alley
- * 项目: Alley
  * @date 08/10/2024 - 19:41
- * 日期: 08/10/2024 - 19:41
  */
 public class KitSetDisclaimerCommand extends BaseCommand {
     @CommandData(

@@ -8,7 +8,10 @@ import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.SettingsLocaleImpl;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
+import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.filter.FilterService;
+import dev.revere.alley.feature.match.Match;
+import dev.revere.alley.feature.match.model.GameParticipant;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -48,6 +51,9 @@ public class CoreChatListener implements Listener {
 
             for (Player recipient : event.getRecipients()) {
                 Profile profile = this.plugin.getService(ProfileService.class).getProfile(recipient.getUniqueId());
+                if (!canReceivePublicChat(profile, recipient, player)) {
+                    continue;
+                }
                 if (profile.getProfileData().getSettingData().isProfanityFilterEnabled()) {
                     if (!event.isCancelled()) {
                         recipient.sendMessage(censoredFormat);
@@ -62,7 +68,30 @@ public class CoreChatListener implements Listener {
             this.plugin.getServer().getConsoleSender().sendMessage(format);
 
             event.setCancelled(true);
+        } else {
+            event.getRecipients().removeIf(recipient -> {
+                Profile profile = this.plugin.getService(ProfileService.class).getProfile(recipient.getUniqueId());
+                return !canReceivePublicChat(profile, recipient, player);
+            });
         }
+    }
+
+    private boolean canReceivePublicChat(Profile recipientProfile, Player recipient, Player sender) {
+        if (recipientProfile == null
+                || recipientProfile.getState() != ProfileState.PLAYING
+                || !recipientProfile.getProfileData().getSettingData().isDisablePublicChatWhenInMatch()
+                || recipient.equals(sender)) {
+            return true;
+        }
+
+        Match match = recipientProfile.getMatch();
+        if (match == null) {
+            return false;
+        }
+
+        GameParticipant<?> recipientParticipant = match.getParticipant(recipient);
+        GameParticipant<?> senderParticipant = match.getParticipant(sender);
+        return recipientParticipant != null && senderParticipant != null && recipientParticipant != senderParticipant;
     }
 
     // --- Suppress advancement announcements in chat ---

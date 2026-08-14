@@ -44,6 +44,8 @@ public class NametagServiceImpl implements NametagService, Listener {
     @Override
     public void initialize(AlleyContext context) {
         this.plugin.getServer().getPluginManager().registerEvents(this, this.plugin);
+        this.plugin.getServer().getPluginManager().registerEvents(
+                new NametagScoreboardListener(this), this.plugin);
     }
 
     /**
@@ -58,20 +60,26 @@ public class NametagServiceImpl implements NametagService, Listener {
     public void updatePlayerState(Player player) {
         if (player == null) return;
 
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            NametagPerspective changedPlayerPerspective = playerPerspectives.get(player.getUniqueId());
+        // Scoreboard/team mutations are world-affecting Bukkit operations on
+        // 1.21.11 (they also rebuild waypoint connections). Always marshal the
+        // complete nametag update back to the primary tick thread.
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(plugin, () -> updatePlayerState(player));
+            return;
+        }
 
-            for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
-                if (changedPlayerPerspective != null) {
-                    changedPlayerPerspective.updateNametagFor(onlinePlayer);
-                }
+        NametagPerspective changedPlayerPerspective = playerPerspectives.get(player.getUniqueId());
 
-                NametagPerspective otherPlayerPerspective = playerPerspectives.get(onlinePlayer.getUniqueId());
-                if (otherPlayerPerspective != null) {
-                    otherPlayerPerspective.updateNametagFor(player);
-                }
+        for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+            if (changedPlayerPerspective != null) {
+                changedPlayerPerspective.updateNametagFor(onlinePlayer);
             }
-        });
+
+            NametagPerspective otherPlayerPerspective = playerPerspectives.get(onlinePlayer.getUniqueId());
+            if (otherPlayerPerspective != null) {
+                otherPlayerPerspective.updateNametagFor(player);
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -80,10 +88,30 @@ public class NametagServiceImpl implements NametagService, Listener {
         NametagPerspective newPerspective = new NametagPerspective(this, player, this.nametagRegistry);
         playerPerspectives.put(player.getUniqueId(), newPerspective);
 
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+        // Run next tick so the joining player's scoreboard is fully attached,
+        // but keep the operation synchronous with the server tick thread.
+        Bukkit.getScheduler().runTask(plugin, () -> {
             nametagRegistry.sendAllAdapters(player);
             updatePlayerState(player);
         });
+        Bukkit.getScheduler().runTaskLater(plugin,
+                () -> refreshAfterScoreboardChange(player), 2L);
+    }
+
+    /** Rebuild nametag teams after another subsystem replaces the player's scoreboard. */
+    public void refreshAfterScoreboardChange(Player player) {
+        if (player == null || !player.isOnline()) return;
+        if (!Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTask(plugin, () -> refreshAfterScoreboardChange(player));
+            return;
+        }
+
+        NametagPerspective perspective = playerPerspectives.get(player.getUniqueId());
+        if (perspective == null) return;
+
+        perspective.getDisplayedAdapters().clear();
+        nametagRegistry.sendAllAdapters(player);
+        updatePlayerState(player);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

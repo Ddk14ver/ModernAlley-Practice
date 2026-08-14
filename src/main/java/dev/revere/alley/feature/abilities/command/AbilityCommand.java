@@ -4,6 +4,7 @@ import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
+import dev.revere.alley.library.command.annotation.CompleterData;
 import dev.revere.alley.feature.abilities.AbilityService;
 import dev.revere.alley.common.text.CC;
 import lombok.Getter;
@@ -11,6 +12,10 @@ import lombok.Setter;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 /**
  * @author remi
  * @project Alley
@@ -21,6 +26,28 @@ import org.bukkit.entity.Player;
 public class AbilityCommand extends BaseCommand {
 
     private AlleyPlugin plugin = AlleyPlugin.getInstance();
+
+    @CompleterData(name = "ability")
+    public List<String> abilityCompleter(CommandArgs command) {
+        List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
+
+        if (!command.getSender().hasPermission("hypractice.command.ability")) {
+            return completion;
+        }
+
+        if (args.length == 1) {
+            completion.addAll(Arrays.asList("give", "list"));
+            return completion;
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("give")) {
+            completion.add("all");
+            plugin.getService(AbilityService.class).getAbilityKeys().forEach(completion::add);
+        }
+
+        return completion;
+    }
 
     @CommandData(
             name = "ability",

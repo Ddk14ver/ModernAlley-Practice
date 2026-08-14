@@ -13,11 +13,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 5/21/2024
- * 日期 2024年5月21日
  */
 public class SpectateCommand extends BaseCommand {
     @CommandData(
@@ -55,6 +52,11 @@ public class SpectateCommand extends BaseCommand {
         }
 
         Profile targetProfile = this.plugin.getService(ProfileService.class).getProfile(target.getUniqueId());
+
+        if (!targetProfile.getProfileData().getSettingData().isAllowSpectators()) {
+            player.sendMessage(CC.translate("&cThat player has spectators disabled."));
+            return;
+        }
 
         if (targetProfile.getFfaMatch() != null && profile.getState() == ProfileState.TOURNAMENT_LOBBY) {
             player.sendMessage(this.getString(GlobalMessagesLocaleImpl.ERROR_YOU_CANNOT_SPECTATE_IN_TOURNAMENT));

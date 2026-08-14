@@ -360,7 +360,7 @@ queue:
         format:
           - ''
           - '&6&l{kit}'
-          - ' &6&l│ &fPing Range: &6N/A'
+          - ' &6&l│ &fPing Range: &6{ping-range}'
           - '  &7&oSearching for match...'
           - ''
       ranked:
@@ -369,7 +369,7 @@ queue:
           - ''
           - '&6&l{kit} &6&l✫Ranked'
           - ' &6&l│ &fELO Range: &6{min-elo} &7&l» &6{max-elo}'
-          - ' &6&l│ &fPing Range: &6N/A'
+          - ' &6&l│ &fPing Range: &6{ping-range}'
           - '  &7&oSearching for match...'
           - ''
         limit-reached:
@@ -377,7 +377,7 @@ queue:
           format:
             - ''
             - '&6&l{kit} &6&l✫Ranked'
-            - ' &6&l│ &fPing Range: &6N/A'
+            - ' &6&l│ &fPing Range: &6{ping-range}'
             - '  &c&lRANGE LIMIT REACHED...'
             - ''
   join-message:

@@ -133,7 +133,7 @@ public class PotionMotionListener implements Listener {
             if (!player.isOnGround()) {
                 velocity.setY(velocity.getY() + y * adjustment);
             }
-        } catch (ReflectiveOperationException exception) {
+        } catch (ReflectiveOperationException | RuntimeException exception) {
             if (!this.speedCompensationWarningLogged) {
                 this.speedCompensationWarningLogged = true;
                 AlleyPlugin.getInstance().getLogger().warning(
@@ -144,18 +144,24 @@ public class PotionMotionListener implements Listener {
     }
 
     private Object getPlayerHandle(Player player) throws ReflectiveOperationException {
-        if (this.playerGetHandleMethod == null) {
+        if (this.playerGetHandleMethod == null
+                || !this.playerGetHandleMethod.getDeclaringClass().isInstance(player)) {
+            // Both server-controlled and client-backed CraftPlayer instances expose getHandle()
+            // from different declaring classes. Never invoke one class's cached
+            // method on the other implementation.
             this.playerGetHandleMethod = player.getClass().getMethod("getHandle");
         }
         return this.playerGetHandleMethod.invoke(player);
     }
 
     private Object getKnownMovement(Object handle) throws ReflectiveOperationException {
-        if (this.getKnownMovementMethod == null) {
+        if (this.getKnownMovementMethod == null
+                || !this.getKnownMovementMethod.getDeclaringClass().isInstance(handle)) {
             this.getKnownMovementMethod = handle.getClass().getMethod("getKnownMovement");
         }
         Object movement = this.getKnownMovementMethod.invoke(handle);
-        if (this.vectorXMethod == null) {
+        if (this.vectorXMethod == null
+                || !this.vectorXMethod.getDeclaringClass().isInstance(movement)) {
             Class<?> vectorType = movement.getClass();
             this.vectorXMethod = vectorType.getMethod("x");
             this.vectorYMethod = vectorType.getMethod("y");
@@ -165,19 +171,23 @@ public class PotionMotionListener implements Listener {
     }
 
     private boolean isRelativeVelocityGloballyDisabled(Object handle) throws ReflectiveOperationException {
-        if (this.levelMethod == null) {
+        if (this.levelMethod == null
+                || !this.levelMethod.getDeclaringClass().isInstance(handle)) {
             this.levelMethod = handle.getClass().getMethod("level");
         }
         Object level = this.levelMethod.invoke(handle);
-        if (this.paperConfigMethod == null) {
+        if (this.paperConfigMethod == null
+                || !this.paperConfigMethod.getDeclaringClass().isInstance(level)) {
             this.paperConfigMethod = level.getClass().getMethod("paperConfig");
         }
         Object worldConfig = this.paperConfigMethod.invoke(level);
-        if (this.miscField == null) {
+        if (this.miscField == null
+                || !this.miscField.getDeclaringClass().isInstance(worldConfig)) {
             this.miscField = worldConfig.getClass().getField("misc");
         }
         Object misc = this.miscField.get(worldConfig);
-        if (this.disableRelativeVelocityField == null) {
+        if (this.disableRelativeVelocityField == null
+                || !this.disableRelativeVelocityField.getDeclaringClass().isInstance(misc)) {
             this.disableRelativeVelocityField = misc.getClass().getField("disableRelativeProjectileVelocity");
         }
         return this.disableRelativeVelocityField.getBoolean(misc);
@@ -235,17 +245,19 @@ public class PotionMotionListener implements Listener {
 
     private boolean setInitialPosition(Projectile projectile, Location location) {
         try {
-            if (this.projectileGetHandleMethod == null) {
+            if (this.projectileGetHandleMethod == null
+                    || !this.projectileGetHandleMethod.getDeclaringClass().isInstance(projectile)) {
                 this.projectileGetHandleMethod = projectile.getClass().getMethod("getHandle");
             }
             Object handle = this.projectileGetHandleMethod.invoke(projectile);
-            if (this.setPositionMethod == null) {
+            if (this.setPositionMethod == null
+                    || !this.setPositionMethod.getDeclaringClass().isInstance(handle)) {
                 this.setPositionMethod = handle.getClass().getMethod(
                         "setPos", double.class, double.class, double.class);
             }
             this.setPositionMethod.invoke(handle, location.getX(), location.getY(), location.getZ());
             return true;
-        } catch (ReflectiveOperationException exception) {
+        } catch (ReflectiveOperationException | RuntimeException exception) {
             if (!this.nmsOffsetWarningLogged) {
                 this.nmsOffsetWarningLogged = true;
                 AlleyPlugin.getInstance().getLogger().warning(

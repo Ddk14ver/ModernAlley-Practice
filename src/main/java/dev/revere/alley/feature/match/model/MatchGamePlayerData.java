@@ -14,6 +14,12 @@ import lombok.Setter;
 @Getter
 @Setter
 public class MatchGamePlayerData {
+    /**
+     * Max milliseconds between releasing W (sprint-stop) and landing a melee hit for it to
+     * still count as a W-tap attempt. W-taps are executed a tick or two before the hit.
+     */
+    private static final long WTAP_WINDOW_MS = 350L;
+
     private int lives;
     private int score;
     private int kills;
@@ -29,8 +35,12 @@ public class MatchGamePlayerData {
     private int missedPotions;
     private int thrownPotions;
 
-    private int wTaps;
-    private boolean wasSprinting;
+    private int wTapAttempts;
+    private int wTapSuccesses;
+    private long lastSprintStopMillis;
+
+    /** Amount of health naturally regenerated during the match (RegainReason.REGEN). */
+    private double regen;
 
     private BaseRaiderRole role;
 
@@ -53,14 +63,30 @@ public class MatchGamePlayerData {
     }
 
     /**
-     * W-tap: attacker stops sprinting right before/at the moment of hit.
-     * Called when attacker was sprinting last tick but isn't now.
+     * Records a sprint-toggle event (PlayerToggleSprintEvent).
+     * When the player stops sprinting (releases W) we timestamp it — the start of a potential
+     * W-tap. Called with the resulting sprint state, so {@code false} means "just stopped sprinting".
      */
-    public void tryDetectWTap(boolean currentlySprinting) {
-        if (wasSprinting && !currentlySprinting) {
-            this.wTaps++;
+    public void onSprintToggle(boolean sprintingNow) {
+        if (!sprintingNow) {
+            this.lastSprintStopMillis = System.currentTimeMillis();
         }
-        wasSprinting = currentlySprinting;
+    }
+
+    /**
+     * Called on each melee hit. A W-tap attempt is a sprint-stop that happened shortly before
+     * the hit; it succeeds when the hit lands while still not sprinting (sprint fully reset),
+     * matching the reference PotPvP wTapAllHits/wTapSuccessHits model.
+     */
+    public void handleWTap(boolean sprintingNow) {
+        long msSinceSprintStop = System.currentTimeMillis() - this.lastSprintStopMillis;
+        if (msSinceSprintStop < 0 || msSinceSprintStop > WTAP_WINDOW_MS) {
+            return;
+        }
+        this.wTapAttempts++;
+        if (!sprintingNow) {
+            this.wTapSuccesses++;
+        }
     }
 
     /**
@@ -99,7 +125,18 @@ public class MatchGamePlayerData {
         this.blockedHits++;
     }
 
-    public void incrementWTaps() {
-        this.wTaps++;
+    /** Adds naturally regenerated health (in health points). */
+    public void addRegen(double amount) {
+        this.regen += amount;
+    }
+
+    /**
+     * W-tap rate as a percentage of all W-tap attempts (successful / attempts), matching the
+     * reference PotPvP calcWTap calculation. Returns 0 when there were no attempts.
+     * W-tap 命中率 = 成功 W-tap 次数 / W-tap 尝试次数；无尝试时返回 0。
+     */
+    public int getWTapPercentage() {
+        if (this.wTapAttempts <= 0) return 0;
+        return Math.round(100.0F * this.wTapSuccesses / this.wTapAttempts);
     }
 }

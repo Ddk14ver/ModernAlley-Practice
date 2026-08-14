@@ -6,7 +6,6 @@ import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.queue.Queue;
-import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
 
@@ -70,7 +69,7 @@ public class GomokuFFAMatch extends FFAMatch implements GomokuPlayable {
 
     private Player firstOnlinePlayer(GameParticipant<MatchGamePlayer> participant) {
         return participant.getPlayers().stream()
-                .map(gamePlayer -> Bukkit.getPlayer(gamePlayer.getUuid()))
+                .map(MatchGamePlayer::getTeamPlayer)
                 .filter(player -> player != null && player.isOnline())
                 .findFirst()
                 .orElse(null);

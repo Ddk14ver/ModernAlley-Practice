@@ -9,11 +9,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project Alley
- * 项目：Alley
  * @date 01/06/2024
- * 日期：2024年1月6日
  */
 @CosmeticData(type = CosmeticType.SOUND_EFFECT, name = "Step", description = "Play step sound upon kill", permission = "step", icon = Material.REDSTONE, slot = 11)
 public class StepSoundEffect extends BaseSoundEffect {

@@ -3,6 +3,8 @@ package dev.revere.alley.feature.ffa.command;
 import dev.revere.alley.common.text.CC;
 import dev.revere.alley.common.text.ClickableUtil;
 import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.feature.arena.ArenaService;
+import dev.revere.alley.feature.ffa.FFAService;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
@@ -23,16 +25,41 @@ public class FFACommand extends BaseCommand {
     @CompleterData(name = "ffa")
     public List<String> ffaCompleter(CommandArgs command) {
         List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
 
-        if (!command.getPlayer().hasPermission(this.getAdminPermission())) {
+        if (args.length == 1) {
+            if (command.getSender().hasPermission(this.getAdminPermission())) {
+                completion.addAll(Arrays.asList(
+                        "join", "leave", "spawn", "spectate",
+                        "maxplayers", "safezone", "setarena", "setslot", "setspawn",
+                        "list", "setup", "delete", "toggle", "add", "kick", "listplayers"
+                ));
+            }
             return completion;
         }
 
-        if (command.getArgs().length == 1) {
-            completion.addAll(Arrays.asList(
-                    "maxplayers", "setsafezone", "setarena", "setslot", "setspawn",
-                    "list", "setup", "delete", "toggle", "add", "kick", "listplayers"
-            ));
+        if (args.length == 2) {
+            switch (args[0].toLowerCase()) {
+                case "maxplayers", "setarena", "setslot", "delete", "listplayers", "setup", "toggle", "join", "spectate" ->
+                        this.plugin.getService(FFAService.class).getFfaKits().forEach(kit -> completion.add(kit.getName()));
+                case "safezone", "setspawn" -> this.plugin.getService(ArenaService.class).getArenas()
+                        .forEach(arena -> completion.add(arena.getName()));
+                default -> { }
+            }
+            return completion;
+        }
+
+        if (args.length == 3) {
+            switch (args[0].toLowerCase()) {
+                case "add" -> this.plugin.getService(FFAService.class).getFfaKits()
+                        .forEach(kit -> completion.add(kit.getName()));
+                case "setarena", "setup" -> this.plugin.getService(ArenaService.class).getArenas()
+                        .forEach(arena -> completion.add(arena.getName()));
+                case "setspawn" -> completion.addAll(List.of("1", "2"));
+                case "safezone" -> completion.addAll(List.of("pos1", "pos2"));
+                default -> { }
+            }
+            return completion;
         }
 
         return completion;

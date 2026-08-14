@@ -1,48 +1,66 @@
 enabled: true
+# Logs the resolved Match/KB profile and every Bot knockback bridge application.
+debug: false
 countdown-seconds: 3
 match-time-limit-seconds: 300
 return-to-lobby-delay-seconds: 3
 
 profiles:
+  # All difficulties use the normal player's full forward input and sprint speed.
   easy:
     display-name: "&aEasy"
     icon: WOODEN_SWORD
     cps: 6.0
-    attack-range: 2.7
-    movement-speed: 0.85
-    reaction-ticks: 6
-    aim-error: 0.18
+    maxreach: 2.0
+    swing-range: 6.0
+    minreach: 1.45
+    movement-speed: 1.0
+    aim-speed: 12.0
+    aim-error: 0.32
+    ping: 0
     w-tap: false
     strafe: false
     bow: false
     rod: false
     lava: false
+    lava-ticks: 12
+    antifire: false
     heal-health: 6.0
   normal:
     display-name: "&eNormal"
     icon: IRON_SWORD
     cps: 10.0
-    attack-range: 3.0
+    maxreach: 2.8
+    swing-range: 6.2
+    minreach: 1.25
     movement-speed: 1.0
-    reaction-ticks: 3
-    aim-error: 0.08
+    aim-speed: 18.0
+    aim-error: 0.12
+    ping: 0
     w-tap: true
     strafe: true
     bow: true
     rod: true
     lava: false
+    lava-ticks: 12
+    antifire: true
     heal-health: 9.0
   hard:
     display-name: "&cHard"
     icon: DIAMOND_SWORD
     cps: 14.0
-    attack-range: 3.2
-    movement-speed: 1.12
-    reaction-ticks: 1
-    aim-error: 0.02
+    maxreach: 3.0
+    swing-range: 6.5
+    minreach: 1.00
+    movement-speed: 1.0
+    aim-speed: 32.0
+    aim-error: 0.08
+    ping: 0
     w-tap: true
     strafe: true
     bow: true
     rod: true
     lava: true
+    lava-ticks: 16
+    antifire: true
     heal-health: 12.0

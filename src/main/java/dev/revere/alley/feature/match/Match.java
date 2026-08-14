@@ -19,7 +19,10 @@ import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.arena.Arena;
 import dev.revere.alley.feature.arena.ArenaService;
 import dev.revere.alley.feature.arena.internal.types.StandAloneArena;
+import dev.revere.alley.feature.bot.BotService;
 import dev.revere.alley.feature.combat.CombatService;
+import dev.revere.alley.feature.challenge.ChallengeService;
+import dev.revere.alley.feature.challenge.ChallengeType;
 import dev.revere.alley.feature.cosmetic.CosmeticService;
 import dev.revere.alley.feature.cosmetic.internal.repository.BaseCosmeticRepository;
 import dev.revere.alley.feature.cosmetic.internal.repository.KillEffectRepository;
@@ -28,12 +31,14 @@ import dev.revere.alley.feature.cosmetic.internal.repository.impl.killeffect.Bas
 import dev.revere.alley.feature.cosmetic.internal.repository.impl.killmessage.KillMessagePack;
 import dev.revere.alley.feature.cosmetic.internal.repository.impl.soundeffect.BaseSoundEffect;
 import dev.revere.alley.feature.cosmetic.model.CosmeticType;
+import dev.revere.alley.feature.event.EventService;
 import dev.revere.alley.feature.cooldown.Cooldown;
 import dev.revere.alley.feature.cooldown.CooldownService;
 import dev.revere.alley.feature.cooldown.CooldownType;
 import dev.revere.alley.feature.hotbar.HotbarService;
 import dev.revere.alley.feature.hotbar.HotbarType;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldOffhand;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingCampProtectionImpl;
 import dev.revere.alley.feature.kit.setting.types.mode.*;
 import dev.revere.alley.feature.kit.setting.types.visual.KitSettingHealthBar;
@@ -44,6 +49,7 @@ import dev.revere.alley.feature.match.data.types.MatchDataSolo;
 import dev.revere.alley.feature.match.internal.types.RoundsMatch;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
+import dev.revere.alley.feature.match.listener.MatchListener;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.GamePlayer;
 import dev.revere.alley.feature.match.model.MatchGamePlayerData;
@@ -55,8 +61,10 @@ import dev.revere.alley.feature.match.task.MatchTask;
 import dev.revere.alley.feature.match.task.mode.PlatformDecayTask;
 import dev.revere.alley.feature.match.task.other.MatchCampProtectionTask;
 import dev.revere.alley.feature.match.task.other.MatchRespawnTask;
+import dev.revere.alley.feature.match.utility.MatchResultFlight;
 import dev.revere.alley.feature.music.MusicService;
 import dev.revere.alley.feature.queue.Queue;
+import dev.revere.alley.feature.queue.listener.PlayAgainListener;
 import dev.revere.alley.feature.party.Party;
 import dev.revere.alley.feature.party.PartyService;
 import dev.revere.alley.feature.spawn.SpawnService;
@@ -74,6 +82,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
@@ -107,6 +117,8 @@ public abstract class Match {
     private final List<UUID> spectators = new CopyOnWriteArrayList<>();
     private final List<Snapshot> snapshots = new ArrayList<>();
     private final java.util.Set<UUID> playerWinners = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Participants initialized through the normal Match setup pipeline. */
+    private final java.util.Set<UUID> initializedPlayers = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private boolean teamMatch;
     private boolean affectStatistics = true;
@@ -218,6 +230,17 @@ public abstract class Match {
     public abstract void handleDeathItemDrop(Player player, PlayerDeathEvent event);
 
     /**
+     * Defers a match transition to the primary server thread when a region
+     * tick worker invokes it. Returns true when the caller must stop executing
+     * its current path.
+     */
+    protected final boolean deferToPrimaryThread(Runnable transition) {
+        if (Bukkit.isPrimaryThread()) return false;
+        this.plugin.getServer().getScheduler().runTask(this.plugin, transition);
+        return true;
+    }
+
+    /**
      * Starts the match by setting the state and updating player profiles and running the match task.
      * 通过设置状态、更新玩家资料并运行比赛任务来启动比赛。
      */
@@ -234,6 +257,40 @@ public abstract class Match {
         this.startTime = System.currentTimeMillis();
     }
 
+    /**
+     * Returns whether a participant was found and initialized during startMatch.
+     * Bot sessions use this only as a defensive fallback for a freshly spawned NPC
+     * that Citizens has not exposed through Bukkit#getEntity yet.
+     */
+    public boolean isPlayerInitialized(UUID uuid) {
+        return uuid != null && this.initializedPlayers.contains(uuid);
+    }
+
+    /**
+     * Restores legacy combat when a prior match's delayed cleanup raced a fast
+     * Play Again. This runs at the real match start, after that cleanup has had
+     * a chance to finish.
+     */
+    public void ensureLegacyCombatApplied() {
+        MatchServiceImpl matchService = (MatchServiceImpl) this.plugin.getService(MatchService.class);
+        if (matchService.getLegacyCombatService() == null) {
+            return;
+        }
+
+        this.getParticipants().forEach(participant -> participant.getPlayers().forEach(gamePlayer -> {
+            Player player = gamePlayer.getTeamPlayer();
+            if (player == null) {
+                return;
+            }
+
+            Profile profile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
+            if (profile != null && profile.getMatch() == this
+                    && !matchService.getLegacyCombatService().isKitApplied(player, this.kit)) {
+                matchService.getLegacyCombatService().applyKit(player, this.kit);
+            }
+        }));
+    }
+
     public void endMatch() {
         this.clearPearlCooldowns();
 
@@ -243,8 +300,6 @@ public abstract class Match {
                 this::deleteArenaCopyIfStandalone, 60L);
 
         this.getParticipants().forEach(this::finalizeParticipant);
-        this.getParticipants().forEach(participant -> participant.getPlayers().forEach(gamePlayer ->
-                dev.revere.alley.feature.cps.CPSListener.getCpsManager().clearCombatCPS(gamePlayer.getUuid())));
         this.updateParticipantNametags();
 
         this.cleanupTasks();
@@ -255,6 +310,7 @@ public abstract class Match {
         if (this.tournament != null) {
            this.plugin.getService(TournamentService.class).handleMatchEnd(this);
         }
+        this.plugin.getService(EventService.class).handleMatchEnd(this);
     }
 
     private void clearPearlCooldowns() {
@@ -269,7 +325,7 @@ public abstract class Match {
                 }
                 cooldownService.removeCooldown(uuid, CooldownType.ENDER_PEARL);
 
-                Player player = this.plugin.getServer().getPlayer(uuid);
+                Player player = gamePlayer.getTeamPlayer();
                 if (player != null) {
                     player.setLevel(0);
                     player.setExp(0.0F);
@@ -298,10 +354,19 @@ public abstract class Match {
                 dev.revere.alley.feature.cosmetic.model.CosmeticType.MVP_MUSIC,
                 dev.revere.alley.feature.cosmetic.internal.repository.MVPMusicRepository.class);
         java.util.List<Player> onlinePlayers = new java.util.ArrayList<>();
+        java.util.List<Player> musicPlayers = new java.util.ArrayList<>();
         for (var p : getParticipants()) {
             for (var gp : p.getPlayers()) {
-                Player pl = this.plugin.getServer().getPlayer(gp.getUuid());
-                if (pl != null) onlinePlayers.add(pl);
+                Player pl = gp.getTeamPlayer();
+                if (pl != null) {
+                    onlinePlayers.add(pl);
+                    Profile recipientProfile = this.plugin.getService(ProfileService.class)
+                            .getProfile(pl.getUniqueId());
+                    if (recipientProfile == null
+                            || recipientProfile.getProfileData().getSettingData().isMatchMvpMusicEnabled()) {
+                        musicPlayers.add(pl);
+                    }
+                }
             }
         }
 
@@ -311,7 +376,7 @@ public abstract class Match {
                 musicName = mvpProfile.getProfileData().getCosmeticData().getSelected(dev.revere.alley.feature.cosmetic.model.CosmeticType.MVP_MUSIC);
                 if (musicName != null && !musicName.equalsIgnoreCase("None")) {
                     var music = (dev.revere.alley.feature.cosmetic.internal.repository.impl.mvpmusic.BaseMVPMusic) repo.getCosmetic(musicName);
-                    if (music != null) music.play(onlinePlayers);
+                    if (music != null) music.play(musicPlayers);
                 }
             }
         }
@@ -323,8 +388,12 @@ public abstract class Match {
         Runnable titleAnnouncement = () -> onlinePlayers.stream()
                 .filter(Player::isOnline)
                 .forEach(player -> {
+                    Profile recipientProfile = this.plugin.getService(ProfileService.class)
+                            .getProfile(player.getUniqueId());
+                    boolean musicEnabled = recipientProfile == null
+                            || recipientProfile.getProfileData().getSettingData().isMatchMvpMusicEnabled();
                     player.sendTitle(CC.translate("&6&lMVP: &e&l" + mvpName),
-                            sub, 10, 80, 10);
+                            musicEnabled ? sub : "", 10, 80, 10);
                     player.sendMessage(CC.translate("&6&lMVP &7| &e" + mvpName
                             + " &7with &f" + mvpKills + " &7kills!"));
                 });
@@ -357,7 +426,7 @@ public abstract class Match {
             List<MatchGamePlayer> playersToUpdate = participant.getAllPlayers();
 
             playersToUpdate.stream()
-                    .map(gamePlayer -> plugin.getServer().getPlayer(gamePlayer.getUuid()))
+                    .map(MatchGamePlayer::getTeamPlayer)
                     .filter(Objects::nonNull)
                     .forEach(nametagService::updatePlayerState);
         });
@@ -387,14 +456,13 @@ public abstract class Match {
         KnockbackManager knockbackManager = this.plugin.getService(KnockbackManager.class);
 
         gameParticipant.getPlayers().forEach(gamePlayer -> {
-            Player player = this.plugin.getServer().getPlayer(gamePlayer.getUuid());
+            Player player = gamePlayer.getTeamPlayer();
             if (player == null) {
                 return;
             }
 
             // Reset max CPS for the new match
             dev.revere.alley.feature.cps.CPSListener.getCpsManager().resetMaxCPS(gamePlayer.getUuid());
-            dev.revere.alley.feature.cps.CPSListener.getCpsManager().resetCombatCPS(gamePlayer.getUuid());
 
             this.updatePlayerProfileForMatch(player);
             this.setupPlayer(player);
@@ -404,6 +472,7 @@ public abstract class Match {
 
             this.registerHealthObjectiveForPlayer(player);
             this.registerCampProtectionTask(player);
+            this.initializedPlayers.add(gamePlayer.getUuid());
         });
     }
 
@@ -418,7 +487,7 @@ public abstract class Match {
         gameParticipant.getPlayers().stream()
                 .filter(gamePlayer -> !gamePlayer.isDisconnected())
                 .forEach(gamePlayer -> {
-                    Player player = this.plugin.getServer().getPlayer(gamePlayer.getUuid());
+                    Player player = gamePlayer.getTeamPlayer();
                     if (player != null) {
                         // Clean up legacy combat state when match ends
                         MatchServiceImpl matchServiceImpl = (MatchServiceImpl) this.plugin.getService(MatchService.class);
@@ -440,46 +509,109 @@ public abstract class Match {
      *               要收尾的玩家。
      */
     public void finalizePlayer(Player player) {
+        Profile profileBeforeFinalize = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
+        if (profileBeforeFinalize != null && profileBeforeFinalize.getMatch() != this) {
+            // Play Again can release a player before the match's normal delayed
+            // finalizer runs. Do not reset that player back into the old match.
+            return;
+        }
+
         VisibilityService visibilityService = this.plugin.getService(VisibilityService.class);
         MusicService musicService = this.plugin.getService(MusicService.class);
         this.plugin.getService(KnockbackManager.class).clearKnockback(player);
         musicService.stopMusic(player);
         this.updatePlayerProfileForLobby(player);
+
+        boolean preserveResultFlight = MatchResultFlight.isPending(player);
+        boolean wasFlying = player.isFlying() || player.getAllowFlight();
         this.resetPlayerState(player);
+        if (wasFlying || preserveResultFlight) {
+            // Keep airborne players (e.g. partyFFA spectators hovering at the arena center)
+            // flying until the delayed teleport to spawn, so they don't fall out of the
+            // arena and die while the MVP buffer plays out before being sent to the lobby.
+            player.setAllowFlight(true);
+            player.setFlying(true);
+        }
+
         Profile profile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
         Party party = this.plugin.getService(PartyService.class).getParty(player);
         profile.setParty(party);
         HotbarService hotbarService = this.plugin.getService(HotbarService.class);
-        hotbarService.applyHotbarItems(player, profile.getParty() != null ? HotbarType.PARTY : HotbarType.LOBBY);
         visibilityService.updateVisibility(player);
+        // Bot sessions are removed during match cleanup, before this delayed
+        // lobby task executes. Capture the state while the session still exists.
+        final boolean botMatch = this.plugin.getService(BotService.class).getSession(player) != null;
 
         // Resume lobby music only after the player is back at the lobby spawn.
         org.bukkit.Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
+            Profile delayedProfile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
+            if (delayedProfile == null || delayedProfile.getMatch() != null
+                    || delayedProfile.getState() == ProfileState.WAITING) {
+                return;
+            }
             this.teleportPlayerToSpawn(player);
+            MatchResultFlight.clear(player);
             this.startLobbyMusicAfterMvp(player, musicService);
 
-            // Play Again paper + auto-queue after lobby transition
             final UUID pid = player.getUniqueId();
             try {
                 Party currentParty = this.plugin.getService(PartyService.class).getParty(player);
                 Profile currentProfile = this.plugin.getService(ProfileService.class).getProfile(pid);
                 currentProfile.setParty(currentParty);
-                if (currentParty != null) {
-                    hotbarService.applyHotbarItems(player, HotbarType.PARTY);
-                    return;
+                hotbarService.applyHotbarItems(player,
+                        currentParty != null ? HotbarType.PARTY : HotbarType.LOBBY);
+                // The result-time paper (slot 0/1) was replaced by the lobby hotbar. If the
+                // player did not click Play Again before returning (not queued), top the
+                // paper back up into the 4th hotbar slot (3). Players with a pending
+                // Play Again request (queue add runs next tick) must not receive it.
+                // 结果阶段发的纸（0/1格）已被大厅hotbar取代。若玩家返回前没有点击"再来一局"
+                // （未入队），将纸补发到第4格（3）。有pending"再来一局"请求的玩家（入队操作
+                // 在下一tick执行）不得补发。
+                if (!botMatch && currentParty == null
+                        && currentProfile.getQueueProfile() == null
+                        && !PlayAgainListener.isPlayAgainPending(player)) {
+                    player.getInventory().setItem(3, createPlayAgainItem());
                 }
-
-                dev.revere.alley.feature.queue.QueueProfile reservedQueue = currentProfile.getQueueProfile();
-                if (reservedQueue != null && !reservedQueue.isReady()) {
-                    if (reservedQueue.getQueue().activateAfterMatch(player)) {
-                        return;
-                    }
-                    currentProfile.setQueueProfile(null);
-                }
-
-                player.getInventory().setItem(3, createPlayAgainItem());
             } catch (Exception ignored) {}
         }, 50L);
+    }
+
+    /**
+     * Releases a player from an ending match before its normal finalizer. This
+     * makes the player a real lobby player immediately, allowing the next-tick
+     * Play Again queue operation to use the regular queue path.
+     */
+    public boolean releasePlayerForPlayAgain(Player player) {
+        // Allow releasing during any ending stage (the result is broadcast while the
+        // state is still ENDING_ROUND, then flips to ENDING_MATCH), so Play Again works
+        // from the moment the match result appears — not only after the delayed finalizer.
+        // 允许在任意结束阶段释放（结果广播时状态仍为ENDING_ROUND，随后翻转为ENDING_MATCH），
+        // 使"再来一局"从比赛结果出现那一刻起即可使用。
+        MatchState state = this.getState();
+        if (player == null
+                || (state != MatchState.ENDING_ROUND && state != MatchState.ENDING_MATCH)) {
+            return false;
+        }
+
+        Profile profile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
+        if (profile == null || profile.getMatch() != this || profile.getGameEvent() != null) {
+            return false;
+        }
+
+        if (profile.getQueueProfile() != null) {
+            profile.getQueueProfile().getQueue().getProfiles().remove(profile.getQueueProfile());
+            profile.setQueueProfile(null);
+        }
+
+        this.plugin.getService(MusicService.class).stopMusic(player);
+        this.plugin.getService(KnockbackManager.class).clearKnockback(player);
+        this.updatePlayerProfileForLobby(player);
+        this.resetPlayerState(player);
+        this.teleportPlayerToSpawn(player);
+        MatchResultFlight.clear(player);
+        this.plugin.getService(VisibilityService.class).updateVisibility(player);
+        this.plugin.getService(NametagService.class).updatePlayerState(player);
+        return true;
     }
 
     private void startLobbyMusicAfterMvp(Player player, MusicService musicService) {
@@ -500,21 +632,8 @@ public abstract class Match {
         }
     }
 
-    private org.bukkit.inventory.ItemStack createPlayAgainItem() {
-        org.bukkit.inventory.ItemStack paper = new org.bukkit.inventory.ItemStack(org.bukkit.Material.PAPER);
-        org.bukkit.inventory.meta.ItemMeta meta = paper.getItemMeta();
-        meta.setDisplayName(org.bukkit.ChatColor.translateAlternateColorCodes('&', "&6&lPlay Again"));
-        java.util.List<String> lore = new java.util.ArrayList<>();
-        lore.add(org.bukkit.ChatColor.translateAlternateColorCodes('&', "&7Right-click to join the same queue again."));
-        lore.add(org.bukkit.ChatColor.translateAlternateColorCodes('&', "&7Kit: &f" + this.getKit().getDisplayName()));
-        meta.setLore(lore);
-        meta.getPersistentDataContainer().set(
-                new org.bukkit.NamespacedKey(this.plugin,
-                        dev.revere.alley.feature.queue.listener.PlayAgainListener.KIT_KEY),
-                org.bukkit.persistence.PersistentDataType.STRING,
-                this.getKit().getName());
-        paper.setItemMeta(meta);
-        return paper;
+    protected org.bukkit.inventory.ItemStack createPlayAgainItem() {
+        return dev.revere.alley.feature.match.utility.MatchUtility.createPlayAgainItem(this.getKit());
     }
 
     /**
@@ -574,7 +693,7 @@ public abstract class Match {
 
         getParticipants().stream()
                 .flatMap(participant -> participant.getPlayers().stream())
-                .map(gamePlayer -> this.plugin.getServer().getPlayer(gamePlayer.getUuid()))
+                .map(MatchGamePlayer::getTeamPlayer)
                 .filter(Objects::nonNull)
                 .forEach(player -> {
                     Scoreboard scoreboard = player.getScoreboard();
@@ -603,6 +722,7 @@ public abstract class Match {
         }
 
         gamePlayer.setDead(false);
+        MatchListener.clearDeadPlayerPickupBlock(player);
         PlayerUtil.reset(player, true, true);
         this.giveLoadout(player, this.kit);
     }
@@ -626,8 +746,14 @@ public abstract class Match {
             layoutService.giveBooks(player, kit.getName());
         } else if (nonNullLayouts.size() == 1) {
             player.getInventory().setContents(nonNullLayouts.get(0).getItems());
+            if (!kit.isSettingEnabled(KitSettingOldOffhand.class)) {
+                player.getInventory().setItemInOffHand(nonNullLayouts.get(0).getOffhand());
+            }
         } else {
             player.getInventory().setContents(kit.getItems());
+            if (!kit.isSettingEnabled(KitSettingOldOffhand.class)) {
+                player.getInventory().setItemInOffHand(kit.getOffhand());
+            }
         }
 
         player.updateInventory();
@@ -643,6 +769,15 @@ public abstract class Match {
      *               死亡的玩家。
      */
     public void handleDeath(Player player, EntityDamageEvent.DamageCause cause) {
+        if (player == null) return;
+
+        // SparklyPaper/Moonrise can fire damage/death callbacks on an arena
+        // tick worker. The match state machine performs inventory, profile,
+        // spectator and cross-world operations, all of which must run on the
+        // primary server thread. Schedule the whole transition before reading
+        // or mutating any match state on the worker.
+        if (this.deferToPrimaryThread(() -> this.handleDeath(player, cause))) return;
+
         if (!(this.state == MatchState.STARTING || this.state == MatchState.RUNNING)) {
             return;
         }
@@ -652,9 +787,14 @@ public abstract class Match {
 
         GameParticipant<MatchGamePlayer> participant = this.getParticipant(player);
         MatchGamePlayer gamePlayer = this.getFromAllGamePlayers(player);
+        if (participant == null || gamePlayer == null) {
+            return;
+        }
         if (participant.isAllEliminated() && !gamePlayer.isDisconnected()) {
             return;
         }
+
+        MatchListener.blockDeadPlayerPickup(player);
 
         this.handleParticipant(player, gamePlayer);
 
@@ -715,6 +855,11 @@ public abstract class Match {
             return false;
         }
 
+        boolean finalHit = victim != null && killer != null && this.willEndMatchAfterRoundEnd(victim);
+        if (finalHit) {
+            this.applySwingSlowly(killer);
+        }
+
         this.state = MatchState.ENDING_ROUND;
         if (this.runnable != null) {
             this.runnable.setStage(4);
@@ -725,6 +870,9 @@ public abstract class Match {
         if (this.canEndMatch()) {
             if (victim != null && killer != null) {
                 this.handleDeathEffects(victim, killer);
+                if (!finalHit) {
+                    this.applySwingSlowly(killer);
+                }
             }
 
             this.state = MatchState.ENDING_MATCH;
@@ -733,14 +881,46 @@ public abstract class Match {
             final Player winner = killer;
             final Player loser = victim;
             org.bukkit.Bukkit.getScheduler().runTaskLater(this.plugin, () -> {
-                try {
-                    winner.getInventory().setItem(1, createPlayAgainItem());
-                    loser.getInventory().setItem(0, createPlayAgainItem());
-                } catch (Exception ignored) {}
+                giveResultPlayAgainItem(winner, 1);
+                giveResultPlayAgainItem(loser, 0);
             }, 2L);
         }
 
         return true;
+    }
+
+    /**
+     * Determines whether the current round-ending hit will also end the match.
+     * Most match types already expose this through {@link #canEndMatch()}, while
+     * round-based modes can override it because their score is awarded during
+     * round settlement.
+     */
+    protected boolean willEndMatchAfterRoundEnd(Player victim) {
+        return this.canEndMatch();
+    }
+
+    protected void applySwingSlowly(Player killer) {
+        Profile profile = this.plugin.getService(ProfileService.class).getProfile(killer.getUniqueId());
+        if (profile == null || !profile.getProfileData().getSettingData().isSwingSlowlyEnabled()) {
+            return;
+        }
+
+        // Bukkit amplifiers are zero-based: amplifier 237 is Mining Fatigue 238.
+        killer.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, 60, 237, false, false, false), true);
+    }
+
+    private void giveResultPlayAgainItem(Player player, int slot) {
+        if (player == null || !player.isOnline()) return;
+
+        Profile profile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
+        if (profile == null || profile.getMatch() != this
+                || profile.getState() != ProfileState.PLAYING
+                || profile.getQueueProfile() != null
+                || PlayAgainListener.isPlayAgainPending(player)) {
+            return;
+        }
+
+        player.getInventory().setItem(slot, createPlayAgainItem());
     }
 
     /**
@@ -943,6 +1123,12 @@ public abstract class Match {
         GameParticipant<MatchGamePlayer> killerParticipant = getParticipant(killer);
         if (killerParticipant != null) {
             killerParticipant.getLeader().getData().incrementKills();
+
+            if (this.isAffectStatistics() && !this.isTeamMatch()) {
+                Profile killerProfile = this.plugin.getService(ProfileService.class).getProfile(killer.getUniqueId());
+                this.plugin.getService(ChallengeService.class)
+                        .recordProgress(killerProfile, ChallengeType.KILLS, 1);
+            }
         }
     }
 
@@ -1056,7 +1242,7 @@ public abstract class Match {
 
         this.getParticipants().forEach(
                 participant -> participant.getAllPlayers().forEach(gamePlayer -> {
-                    Player player = this.plugin.getServer().getPlayer(gamePlayer.getUuid());
+                    Player player = gamePlayer.getTeamPlayer();
                     if (player != null) {
                         this.createSnapshot(player);
                     }
@@ -1072,7 +1258,7 @@ public abstract class Match {
         // 待办：要么也处理这种情况，要么我们就不存储团队比赛历史
 
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getAllPlayers().forEach(gamePlayer -> {
-            Player player = this.plugin.getServer().getPlayer(gamePlayer.getUuid());
+            Player player = gamePlayer.getTeamPlayer();
             if (player == null) return;
 
             Profile profile = this.plugin.getService(ProfileService.class).getProfile(player.getUniqueId());
@@ -1138,23 +1324,13 @@ public abstract class Match {
         snapshot.setMissedPotions(gamePlayer.getData().getMissedPotions());
         snapshot.setCriticalHits(gamePlayer.getData().getCriticalHits());
         snapshot.setBlockedHits(gamePlayer.getData().getBlockedHits());
-        snapshot.setWTaps(gamePlayer.getData().getWTaps());
+        snapshot.setWTapAttempts(gamePlayer.getData().getWTapAttempts());
+        snapshot.setWTapSuccesses(gamePlayer.getData().getWTapSuccesses());
+        snapshot.setRegen(gamePlayer.getData().getRegen());
 
-        GameParticipant<MatchGamePlayer> ownParticipant = this.getParticipant(player);
-        Set<UUID> opponentIds = new HashSet<>();
-        if (ownParticipant != null) {
-            this.getParticipants().stream()
-                    .filter(participant -> participant != ownParticipant)
-                    .flatMap(participant -> participant.getPlayers().stream())
-                    .map(MatchGamePlayer::getUuid)
-                    .forEach(opponentIds::add);
-        }
-        long snapshotTime = this.endTime > 0L ? this.endTime : System.currentTimeMillis();
-        dev.revere.alley.feature.cps.CPSManager.CombatStats combatStats =
-                dev.revere.alley.feature.cps.CPSListener.getCpsManager().getCombatStats(
-                        player.getUniqueId(), opponentIds, this.startTime, snapshotTime);
-        snapshot.setAverageCombatCps(combatStats.average());
-        snapshot.setHighestCombatCps(combatStats.highest());
+        // Highest CPS uses the real-time session max (reset at match start); average combat CPS
+        // has been removed.
+        snapshot.setHighestCombatCps(dev.revere.alley.feature.cps.CPSListener.getCpsManager().getMaxCPS(player.getUniqueId()));
 
         this.snapshots.add(snapshot);
     }
@@ -1308,6 +1484,11 @@ public abstract class Match {
                 return;
             }
 
+            if (!this.allowsSpectators()) {
+                player.sendMessage(CC.translate("&cOne or more players have spectators disabled."));
+                return;
+            }
+
             this.setupSpectatorProfile(player);
             this.spectators.add(player.getUniqueId());
         }
@@ -1335,6 +1516,15 @@ public abstract class Match {
         this.notifyAll("&6" + profile.getFancyName() + " &fis now spectating the match.");
     }
 
+    public boolean allowsSpectators() {
+        ProfileService profileService = this.plugin.getService(ProfileService.class);
+        return this.getParticipants().stream()
+                .flatMap(participant -> participant.getAllPlayers().stream())
+                .map(gamePlayer -> profileService.getProfile(gamePlayer.getUuid()))
+                .filter(Objects::nonNull)
+                .allMatch(profile -> profile.getProfileData().getSettingData().isAllowSpectators());
+    }
+
     /**
      * Removes a player from the list of spectators.
      * 从观战者列表中移除玩家。
@@ -1343,6 +1533,13 @@ public abstract class Match {
      *               要从观战中移除的玩家。
      */
     public void removeSpectator(Player player, boolean notify) {
+        if (player == null) return;
+        if (!Bukkit.isPrimaryThread()) {
+            this.plugin.getServer().getScheduler().runTask(this.plugin,
+                    () -> this.removeSpectator(player, notify));
+            return;
+        }
+
         ProfileService profileService = this.plugin.getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
 
@@ -1358,6 +1555,10 @@ public abstract class Match {
         player.setAllowFlight(false);
         player.setFlying(false);
 
+        // A spectator is no longer part of the active combat timeline. Clear the
+        // assigned profile as well as the live counter so an old hit-delay window
+        // cannot leak into the lobby.
+        this.plugin.getService(KnockbackManager.class).clearKnockback(player);
         this.resetPlayerState(player);
         this.teleportPlayerToSpawn(player);
         this.spectators.remove(player.getUniqueId());
@@ -1427,7 +1628,7 @@ public abstract class Match {
      */
     public void notifyParticipants(String message) {
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 player.sendMessage(CC.translate(message));
             }
@@ -1461,6 +1662,12 @@ public abstract class Match {
     }
 
     public void broadcastAndStopSpectating() {
+        if (!Bukkit.isPrimaryThread()) {
+            this.plugin.getServer().getScheduler().runTask(this.plugin,
+                    this::broadcastAndStopSpectating);
+            return;
+        }
+
         List<String> firstThreeSpectatorNames = new ArrayList<>();
         this.spectators.stream()
                 .map(uuid -> this.plugin.getServer().getPlayer(uuid))
@@ -1597,7 +1804,7 @@ public abstract class Match {
      */
     public void playSound(Sound sound) {
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 SoundUtil.playCustomSound(player, sound, 1.0F, 1.0F);
             }
@@ -1622,7 +1829,7 @@ public abstract class Match {
      */
     public void playSound(GameParticipant<MatchGamePlayer> participant, Sound sound) {
         participant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 SoundUtil.playCustomSound(player, sound, 1.0F, 1.0F);
             }
@@ -1641,7 +1848,7 @@ public abstract class Match {
     public void sendTitle(String title, String subtitle) {
         ReflectionService reflectionService = this.plugin.getService(ReflectionService.class);
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 reflectionService.getReflectionService(TitleReflectionServiceImpl.class).sendTitle(
                         player,
@@ -1681,7 +1888,7 @@ public abstract class Match {
     public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut, boolean spectators) {
         ReflectionService reflectionService = this.plugin.getService(ReflectionService.class);
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 reflectionService.getReflectionService(TitleReflectionServiceImpl.class).sendTitle(
                         player,
@@ -1708,6 +1915,29 @@ public abstract class Match {
     }
 
     /**
+     * Sends a result title immediately and repeats it after the automatic
+     * respawn when the recipient is currently dead.
+     */
+    protected void sendResultTitle(Player player, String title, String subtitle,
+                                   int fadeIn, int stay, int fadeOut) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+
+        Runnable sendTitle = () -> {
+            if (!player.isOnline()) return;
+            this.plugin.getService(ReflectionService.class)
+                    .getReflectionService(TitleReflectionServiceImpl.class)
+                    .sendTitle(player, title, subtitle, fadeIn, stay, fadeOut);
+        };
+
+        sendTitle.run();
+        if (player.isDead()) {
+            this.plugin.getServer().getScheduler().runTaskLater(this.plugin, sendTitle, 3L);
+        }
+    }
+
+    /**
      * Sends a list of messages to all participants.
      * 向所有参与者发送消息列表。
      *
@@ -1727,7 +1957,7 @@ public abstract class Match {
      */
     public void sendMessage(String message) {
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 player.sendMessage(CC.translate(message));
             }
@@ -1752,7 +1982,7 @@ public abstract class Match {
      */
     public void sendComponentMessage(BaseComponent component) {
         this.getParticipants().forEach(gameParticipant -> gameParticipant.getPlayers().forEach(uuid -> {
-            Player player = this.plugin.getServer().getPlayer(uuid.getUuid());
+            Player player = uuid.getTeamPlayer();
             if (player != null) {
                 player.spigot().sendMessage(component);
             }
@@ -1845,11 +2075,32 @@ public abstract class Match {
     private void teleportPlayerToSpawn(Player player) {
         if (player == null) return;
 
+        if (!Bukkit.isPrimaryThread()) {
+            this.plugin.getServer().getScheduler().runTask(this.plugin,
+                    () -> this.teleportPlayerToSpawn(player));
+            return;
+        }
+
+        if (player.isDead()) {
+            // Never send a cross-world teleport to a player who is still on the death
+            // screen — the client rejects the dimension change with a protocol error.
+            player.spigot().respawn();
+        }
+
+        // Ground the player before the cross-world teleport. Spectators hover at the
+        // arena center and leaving the arena world (a void/custom world) while still
+        // flying is a known source of client-side protocol errors on 1.21 forks. The
+        // teleport follows in the same tick, so grounding here cannot cause a fall.
+        player.setAllowFlight(false);
+        player.setFlying(false);
+
         HotbarService hotbarService = this.plugin.getService(HotbarService.class);
         SpawnService spawnService = this.plugin.getService(SpawnService.class);
 
         spawnService.teleportToSpawn(player);
+        MatchListener.clearDeadPlayerPickupBlock(player);
         hotbarService.applyHotbarItems(player);
+        MatchResultFlight.clear(player);
     }
 
     /**
@@ -1967,7 +2218,7 @@ public abstract class Match {
         ProfileService profileService = this.plugin.getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
 
-        profile.setState(ProfileState.LOBBY);
+        profile.setState(profile.getGameEvent() == null ? ProfileState.LOBBY : ProfileState.PLAYING_EVENT);
         profile.setMatch(null);
 
         // Remove all legacy combat effects.
@@ -1983,6 +2234,8 @@ public abstract class Match {
         profile.setState(ProfileState.SPECTATING);
         profile.setMatch(this);
 
+        // Death spectators must not retain the defeated round's hurt window.
+        this.plugin.getService(KnockbackManager.class).clearKnockback(player);
         PlayerUtil.reset(player, false, true);
     }
 

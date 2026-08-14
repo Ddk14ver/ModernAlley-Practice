@@ -89,7 +89,7 @@ public class GuardianAngel extends Ability {
         }
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     private void onDamage(EntityDamageEvent event) {
         if (event.getEntity() instanceof Player) {
             if (guardians.contains(event.getEntity().getUniqueId())) {

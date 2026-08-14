@@ -40,6 +40,7 @@ public class QueueScoreboardImpl implements Scoreboard {
                     .replaceAll("\\{queued-type}", profile.getQueueProfile() != null ? profile.getQueueProfile().getQueue().getQueueType() : "N/A")
                     .replaceAll("\\{level}", profile.getProfileData().getGlobalLevel() != null ? String.valueOf(levelService.getLevel(profile.getProfileData().getGlobalLevel()).getDisplayName()) : "N/A")
                     .replaceAll("\\{queued-time}", profile.getQueueProfile() != null ? TimeUtil.getFormattedElapsedTime(profile.getQueueProfile().getElapsedTime()) : "00:00")
+                    .replaceAll("\\{queue-ping-range}", formatPingRange(profile))
                     .replaceAll("\\{dot-animation}", this.getDotAnimation().getCurrentFrame())
                     .replaceAll("\\{queued-kit}", profile.getQueueProfile() != null ? profile.getQueueProfile().getQueue().getKit().getDisplayName() : "N/A")
             );
@@ -51,5 +52,10 @@ public class QueueScoreboardImpl implements Scoreboard {
     @Override
     public List<String> getLines(Profile profile, Player player) {
         return Collections.emptyList();
+    }
+
+    private String formatPingRange(Profile profile) {
+        int range = profile.getProfileData().getSettingData().getQueuePingRange();
+        return range <= 0 ? "Disabled" : "+/-" + range + "ms";
     }
 }

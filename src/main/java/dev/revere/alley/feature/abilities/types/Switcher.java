@@ -3,6 +3,7 @@ package dev.revere.alley.feature.abilities.types;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.abilities.Ability;
 import dev.revere.alley.feature.abilities.AbilityService;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.common.time.DurationFormatter;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.Profile;
@@ -94,8 +95,12 @@ public class Switcher extends Ability {
         }
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
+        if (event.getEntity() instanceof Player victim
+                && AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .wasInsideHurtResistanceWindow(victim)) return;
+
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Projectile) {
             Projectile projectile = (Projectile) event.getDamager();
 

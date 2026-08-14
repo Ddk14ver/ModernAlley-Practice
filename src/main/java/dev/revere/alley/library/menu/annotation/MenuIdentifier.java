@@ -7,11 +7,8 @@ import java.lang.annotation.Target;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project alley-practice
- * 项目：alley-practice
  * @date 22/07/2025
- * 日期：22/07/2025
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)

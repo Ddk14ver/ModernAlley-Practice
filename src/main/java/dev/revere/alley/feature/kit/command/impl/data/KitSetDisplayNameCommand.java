@@ -13,11 +13,8 @@ import java.util.Arrays;
 
 /**
  * @author Emmy
- * 作者: Emmy
  * @project Alley
- * 项目: Alley
  * @date 28/04/2024 - 22:46
- * 日期: 28/04/2024 - 22:46
  */
 public class KitSetDisplayNameCommand extends BaseCommand {
     @CommandData(

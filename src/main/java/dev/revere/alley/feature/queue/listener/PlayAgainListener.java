@@ -8,8 +8,11 @@ import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.match.utility.MatchResultFlight;
 import dev.revere.alley.feature.queue.Queue;
 import dev.revere.alley.feature.queue.QueueService;
+import dev.revere.alley.feature.spawn.SpawnService;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -23,8 +26,28 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.util.Set;
+
 public class PlayAgainListener implements Listener {
     public static final String KIT_KEY = "play_again_kit";
+
+    /**
+     * Players who requested Play Again while their match was still ending. The actual
+     * queue add runs two ticks after the lobby release, while the return-to-lobby
+     * top-up paper logic may run in between — this marker prevents that logic from
+     * misreading the player as "not queued" and handing out a slot-3 paper again.
+     * 正在从结束对局中请求"再来一局"的玩家。实际入队操作在下一tick执行（大厅释放之后），
+     * 而返回大厅的补纸逻辑可能恰好在这之间运行——该标记防止补纸逻辑误判"未入队"而补发第4格纸。
+     */
+    private static final Set<java.util.UUID> PENDING_PLAY_AGAIN = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Whether the player is currently awaiting the delayed Play Again queue add.
+     * 玩家是否正在等待下一tick的"再来一局"入队。
+     */
+    public static boolean isPlayAgainPending(Player player) {
+        return player != null && PENDING_PLAY_AGAIN.contains(player.getUniqueId());
+    }
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onRightClick(PlayerInteractEvent event) {
@@ -53,35 +76,91 @@ public class PlayAgainListener implements Listener {
             return true;
         }
 
+        if (queueForPlayAgain(player, kit)) {
+            item.setAmount(0);
+        }
+        return true;
+    }
+
+    /**
+     * Requeues a player two server ticks after the lobby release so the teleport
+     * and state reset settle before matchmaking begins.
+     */
+    public static boolean queueForPlayAgain(Player player, Kit kit) {
+        if (player == null || kit == null) return false;
+
         Queue queue = AlleyPlugin.getInstance().getService(QueueService.class).getQueues().stream()
                 .filter(candidate -> candidate.getKit().equals(kit) && !candidate.isRanked() && !candidate.isDuos())
                 .findFirst()
                 .orElse(null);
         if (queue == null) {
             player.sendMessage(CC.translate("&cThat queue is no longer available."));
-            return true;
+            return false;
         }
 
-        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
-        boolean queued = false;
-        if (profile != null && profile.getState() == ProfileState.LOBBY) {
-            queue.addPlayer(player, 0);
-            queued = profile.getQueueProfile() != null && profile.getQueueProfile().getQueue() == queue;
-        } else if (profile != null && profile.getState() == ProfileState.PLAYING
-                && profile.getMatch() != null && profile.getMatch().getState() == MatchState.ENDING_MATCH) {
-            queued = queue.reserveAfterMatch(player, 0);
-            if (queued) {
-                player.sendMessage(CC.translate("&aJoined the &6" + kit.getDisplayName()
-                        + " &aqueue. Matchmaking activates when you reach spawn."));
-            }
-        }
-
-        if (!queued) {
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        Profile playerProfile = profileService.getProfile(player.getUniqueId());
+        if (playerProfile == null) {
             player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
-            return true;
+            return false;
         }
 
-        item.setAmount(0);
+        // The result is broadcast while the match is still ENDING_ROUND (then flips to
+        // ENDING_MATCH), so accept both stages for an instant release + teleport to lobby.
+        // 结果广播时比赛仍处于ENDING_ROUND（随后翻转为ENDING_MATCH），
+        // 两个阶段都允许立即释放并传送回大厅。
+        MatchState matchState = playerProfile.getMatch() == null ? null : playerProfile.getMatch().getState();
+        if (playerProfile.getState() == ProfileState.PLAYING
+                && (matchState == MatchState.ENDING_MATCH || matchState == MatchState.ENDING_ROUND)) {
+            PENDING_PLAY_AGAIN.add(player.getUniqueId());
+            if (!playerProfile.getMatch().releasePlayerForPlayAgain(player)) {
+                PENDING_PLAY_AGAIN.remove(player.getUniqueId());
+                player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
+                return false;
+            }
+        } else if (playerProfile.getState() != ProfileState.LOBBY || playerProfile.getMatch() != null) {
+            player.sendMessage(CC.translate("&cYou cannot use Play Again right now."));
+            return false;
+        }
+
+        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
+            // Clear the pending marker regardless of the outcome, so the lobby top-up
+            // paper logic can act correctly on a later return.
+            // 无论入队成败都清除pending标记，以便后续返回大厅的补纸逻辑正确判断。
+            PENDING_PLAY_AGAIN.remove(player.getUniqueId());
+            Profile currentProfile = profileService.getProfile(player.getUniqueId());
+            if (!player.isOnline() || currentProfile == null
+                    || currentProfile.getState() != ProfileState.LOBBY
+                    || currentProfile.getMatch() != null
+                    || currentProfile.getQueueProfile() != null) {
+                return;
+            }
+            // Force the player physically back to the lobby before matchmaking. The
+            // match finalizer flips the profile to LOBBY while its lobby teleport
+            // still runs ~50 ticks later — clicking Play Again inside that window
+            // used to queue straight from the arena, skipping the lobby entirely.
+            // 入队前强制玩家物理回到大厅。对局终结器把状态翻成LOBBY后，约50tick才执行
+            // 回大厅传送；在这个窗口内点击"再来一局"会直接从竞技场入队，完全跳过大厅。
+            if (player.isDead()) player.spigot().respawn();
+            MatchResultFlight.clear(player);
+            player.setAllowFlight(false);
+            player.setFlying(false);
+            AlleyPlugin.getInstance().getService(SpawnService.class).teleportToSpawn(player);
+            queue.addPlayer(player, 0);
+        }, 2L);
         return true;
+    }
+
+    public static boolean queueForPlayAgain(Player player, String kitName) {
+        if (kitName == null || kitName.isBlank()) {
+            if (player != null) player.sendMessage(CC.translate("&cUsage: /playagain <kit>"));
+            return false;
+        }
+        Kit kit = AlleyPlugin.getInstance().getService(KitService.class).getKit(kitName);
+        if (kit == null) {
+            if (player != null) player.sendMessage(CC.translate("&cThat kit no longer exists."));
+            return false;
+        }
+        return queueForPlayAgain(player, kit);
     }
 }

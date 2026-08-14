@@ -5,6 +5,7 @@ import dev.revere.alley.feature.combat.CombatAttribution;
 import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.kit.setting.types.visual.KitSettingBowShotIndicator;
 import dev.revere.alley.feature.kit.setting.types.visual.KitSettingHealthBar;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.ffa.spawn.FFASpawnService;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.Profile;
@@ -46,6 +47,8 @@ public class FFADamageListener implements Listener {
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
         if (profile.getState() != ProfileState.FFA) return;
+        if (AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .wasInsideHurtResistanceWindow(player)) return;
 
         CombatService combatService = AlleyPlugin.getInstance().getService(CombatService.class);
         combatService.setLastAttacker(player, attacker);
@@ -55,7 +58,7 @@ public class FFADamageListener implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
         Player attacker = CombatAttribution.getAttacker(event);
         if (attacker == null) return;

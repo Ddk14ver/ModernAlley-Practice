@@ -3,8 +3,10 @@ package dev.revere.alley.feature.match;
 import dev.revere.alley.bootstrap.lifecycle.Service;
 import dev.revere.alley.feature.arena.Arena;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.event.skywars.SkyWarsMatch;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
+import dev.revere.alley.feature.queue.Queue;
 import dev.revere.alley.feature.tournament.model.Tournament;
 
 import java.util.List;
@@ -58,6 +60,26 @@ public interface MatchService extends Service {
     void removeMatch(Match match);
 
     /**
+     * Creates an unregistered, unstarted two-participant match using the first
+     * enabled mode setting registered in the match factory.
+     *
+     * @param queue        queue associated with the match, or {@code null}
+     * @param kit          kit whose settings select the concrete match type
+     * @param arena        arena used by the match
+     * @param isRanked     whether the match is ranked
+     * @param participantA first participant
+     * @param participantB second participant
+     * @return the setting-specific match implementation, or the default match
+     *         implementation when no registered mode setting is enabled
+     */
+    Match createMatch(Queue queue,
+                      Kit kit,
+                      Arena arena,
+                      boolean isRanked,
+                      GameParticipant<MatchGamePlayer> participantA,
+                      GameParticipant<MatchGamePlayer> participantB);
+
+    /**
      * Creates, starts, and registers a new match with the given parameters.
      * 使用给定参数创建、启动并注册新的比赛。
      *
@@ -98,6 +120,9 @@ public interface MatchService extends Service {
     void createAndStartMatch(Kit kit,
                              Arena arena,
                              List<GameParticipant<MatchGamePlayer>> participants);
+
+    SkyWarsMatch createAndStartSkyWarsMatch(Kit kit, Arena arena,
+                                            List<GameParticipant<MatchGamePlayer>> participants, Kit resourceKit);
 
     /**
      * Creates, starts, and registers a new tournament match.

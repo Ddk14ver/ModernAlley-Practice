@@ -9,11 +9,8 @@ import java.util.Map;
 
 /**
  * @author Remi
- *         雷米
  * @project alley-practice
- *         alley-practice 项目
  * @date 2/07/2025
- *         2025年7月2日
  */
 public interface CosmeticService extends Service {
     Map<CosmeticType, BaseCosmeticRepository<?>> getRepositories();

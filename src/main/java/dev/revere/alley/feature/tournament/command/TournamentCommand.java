@@ -16,6 +16,7 @@ import dev.revere.alley.feature.tournament.model.TournamentState;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
+import dev.revere.alley.library.command.annotation.CompleterData;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
@@ -51,6 +52,18 @@ public class TournamentCommand extends BaseCommand {
                     " &6│ &6/tournament disband [id] <reason> &7| &c(Admin) &7Alias for cancel."
             }
     };
+
+    @CompleterData(name = "tournament")
+    public List<String> tournamentCompleter(CommandArgs command) {
+        List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
+        // Sub-command names are completed by the framework's generic fallback
+        // (permission-filtered); this only fills the dynamic kit name for "host".
+        if (args.length == 2 && args[0].equalsIgnoreCase("host")) {
+            this.kitService.getKits().forEach(kit -> completion.add(kit.getName()));
+        }
+        return completion;
+    }
 
     @Override
     @CommandData(name = "tournament", description = "Base tournament command.", aliases = {"t", "tourney"})

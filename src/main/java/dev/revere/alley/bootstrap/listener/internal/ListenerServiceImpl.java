@@ -13,6 +13,7 @@ import dev.revere.alley.feature.server.listener.CraftingListener;
 import dev.revere.alley.feature.spawn.listener.SpawnListener;
 import dev.revere.alley.bootstrap.listener.ListenerService;
 import dev.revere.alley.feature.emoji.listener.EmojiListener;
+import dev.revere.alley.feature.event.listener.EventListener;
 import dev.revere.alley.feature.item.listener.ItemListener;
 import dev.revere.alley.feature.layout.listener.LayoutListener;
 import dev.revere.alley.feature.ffa.listener.FFAListener;
@@ -78,7 +79,8 @@ public class ListenerServiceImpl implements ListenerService {
 
                 new CosmeticListener(),
 
-                new TournamentListener()
+                new TournamentListener(),
+                new EventListener()
 
         ).forEach(listener -> plugin.getServer().getPluginManager().registerEvents(listener, plugin));
     }

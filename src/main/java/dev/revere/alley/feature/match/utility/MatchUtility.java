@@ -1,21 +1,31 @@
 package dev.revere.alley.feature.match.utility;
 
 import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.common.text.ClickableUtil;
 import dev.revere.alley.common.text.CC;
 import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.message.GameMessagesLocaleImpl;
 import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.types.mode.*;
 import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
+import dev.revere.alley.feature.queue.listener.PlayAgainListener;
 import lombok.experimental.UtilityClass;
 import net.md_5.bungee.api.chat.*;
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -200,6 +210,65 @@ public class MatchUtility {
     }
 
     /**
+     * Builds the Play Again paper item for the given kit. Shared by the match result
+     * hand-out (winner slot 1 / loser slot 0) and the return-to-lobby top-up (slot 3).
+     * 为指定套件构建"再来一局"纸物品。对局结果发放（胜者1格/败者0格）与
+     * 返回大厅补发（第4格）共用。
+     */
+    public ItemStack createPlayAgainItem(Kit kit) {
+        if (kit == null) return null;
+
+        ItemStack paper = new ItemStack(Material.PAPER);
+        ItemMeta meta = paper.getItemMeta();
+        meta.setDisplayName(CC.translate("&6&lPlay Again"));
+        List<String> lore = new ArrayList<>();
+        lore.add(CC.translate("&7Right-click to join the same queue again."));
+        lore.add(CC.translate("&7Kit: &f" + kit.getDisplayName()));
+        meta.setLore(lore);
+        meta.getPersistentDataContainer().set(
+                new NamespacedKey(plugin, PlayAgainListener.KIT_KEY),
+                PersistentDataType.STRING,
+                kit.getName());
+        paper.setItemMeta(meta);
+        return paper;
+    }
+
+    /**
+     * Sends the final clickable Play Again line after all result/progress output.
+     * Only normal unranked solo queues can be rejoined through this action.
+     */
+    public void sendPlayAgain(Match match) {
+        if (match == null || match.getKit() == null || match.getQueue() == null
+                || match.getQueue().isRanked() || match.getQueue().isDuos()) {
+            return;
+        }
+
+        TextComponent line = new TextComponent("");
+        line.addExtra(ClickableUtil.createComponent(
+                "&a&l(Play Again)",
+                "/playagain " + match.getKit().getName(),
+                "&eClick to queue for &6" + match.getKit().getDisplayName() + "&e again."
+        ));
+
+        ProfileService profileService = plugin.getService(ProfileService.class);
+        match.getParticipants().forEach(participant -> participant.getPlayers().forEach(gamePlayer -> {
+            Player player = gamePlayer.getTeamPlayer();
+            Profile profile = profileService.getProfile(gamePlayer.getUuid());
+            if (player != null && (profile == null || profile.getGameEvent() == null)) {
+                player.spigot().sendMessage(line);
+            }
+        }));
+
+        match.getSpectators().forEach(uuid -> {
+            Player player = plugin.getServer().getPlayer(uuid);
+            Profile profile = profileService.getProfile(uuid);
+            if (player != null && (profile == null || profile.getGameEvent() == null)) {
+                player.spigot().sendMessage(line);
+            }
+        });
+    }
+
+    /**
      * Sends a combined spigot (clickable) message to all participants including spectators.
      * 向所有参与者（包括观众）发送组合的 Spigot（可点击）消息。
      *
@@ -209,7 +278,7 @@ public class MatchUtility {
     public void sendCombinedSpigotMessage(Match match, BaseComponent... message) {
         match.getParticipants().forEach(gameParticipant -> {
             gameParticipant.getPlayers().forEach(uuid -> {
-                Player player = plugin.getServer().getPlayer(uuid.getUuid());
+                Player player = uuid.getTeamPlayer();
                 if (player != null) {
                     player.spigot().sendMessage(message);
                 }

@@ -17,6 +17,7 @@ public class LayoutData {
     private String name;
     private String displayName;
     private ItemStack[] items;
+    private ItemStack offhand;
 
     /**
      * Constructor for the LayoutData class.

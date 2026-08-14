@@ -37,6 +37,7 @@ public class Kit {
     private ItemStack[] items;
     private ItemStack[] armor;
     private ItemStack[] editorItems;
+    private ItemStack offhand;
 
     private String ffaArenaName;
     private boolean ffaEnabled;
@@ -45,6 +46,7 @@ public class Kit {
 
     private String hideAndSeekSeekerKit;
     private String hideAndSeekHiderKit;
+    private String skyWarsResourceKit;
     private BotAiMode botAiMode;
 
     private KitCategory category;
@@ -107,6 +109,7 @@ public class Kit {
 
         this.hideAndSeekSeekerKit = "";
         this.hideAndSeekHiderKit = "";
+        this.skyWarsResourceKit = "";
         this.botAiMode = BotAiMode.MELEE;
 
         this.kitSettings = new ArrayList<>();

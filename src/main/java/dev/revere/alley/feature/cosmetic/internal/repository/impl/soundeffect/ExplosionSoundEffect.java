@@ -10,11 +10,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @since 02/04/2025
- * 创建日期：2025年2月4日
  */
 @CosmeticData(type = CosmeticType.SOUND_EFFECT, name = "Explosion", description = "Play an explosion sound", permission = "explosion", icon = Material.TNT, slot = 12)
 public class ExplosionSoundEffect extends BaseSoundEffect {

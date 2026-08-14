@@ -35,11 +35,8 @@ import java.util.UUID;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 17/10/2024 - 20:02
- * 日期：2024年10月17日 - 20:02
  */
 @Getter
 @Service(provides = DuelRequestService.class, priority = 260)

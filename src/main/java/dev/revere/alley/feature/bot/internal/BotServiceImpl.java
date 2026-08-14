@@ -13,26 +13,27 @@ import dev.revere.alley.feature.arena.ArenaService;
 import dev.revere.alley.feature.bot.BotDifficultyProfile;
 import dev.revere.alley.feature.bot.BotAiMode;
 import dev.revere.alley.feature.bot.BotService;
+import dev.revere.alley.feature.bot.entity.NativeBotPlayer;
 import dev.revere.alley.feature.bot.listener.BotMatchListener;
 import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingBotQueue;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingGomoku;
 import dev.revere.alley.feature.party.PartyService;
-import net.citizensnpcs.api.CitizensAPI;
-import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -65,6 +66,15 @@ public class BotServiceImpl implements BotService {
         profiles.clear();
         FileConfiguration config = AlleyPlugin.getInstance().getService(ConfigService.class).getBotConfig();
         if (config == null) return;
+        try (InputStream stream = AlleyPlugin.getInstance().getResource("providers/bots.yml")) {
+            if (stream != null) {
+                config.setDefaults(YamlConfiguration.loadConfiguration(
+                        new InputStreamReader(stream, StandardCharsets.UTF_8)));
+            }
+        } catch (java.io.IOException exception) {
+            AlleyPlugin.getInstance().getLogger().warning(
+                    "Could not load bot configuration defaults: " + exception.getMessage());
+        }
 
         ConfigurationSection section = config.getConfigurationSection("profiles");
         if (section == null) return;
@@ -75,18 +85,10 @@ public class BotServiceImpl implements BotService {
     }
 
     private void cleanupStaleBots() {
-        Set<String> botNames = new HashSet<>();
-        for (BotDifficultyProfile profile : profiles.values()) {
-            String name = "Bot_" + profile.getId();
-            botNames.add((name.length() > 16 ? name.substring(0, 16) : name).toLowerCase());
+        for (Player online : List.copyOf(AlleyPlugin.getInstance().getServer().getOnlinePlayers())) {
+            if (online.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG)
+                    && !entitySessions.containsKey(online.getUniqueId())) NativeBotPlayer.remove(online);
         }
-
-        List<NPC> staleBots = new ArrayList<>();
-        for (NPC npc : CitizensAPI.getNPCRegistry().sorted()) {
-            boolean alleyBot = npc.data().get("alley-bot", false);
-            if (alleyBot || botNames.contains(npc.getName().toLowerCase())) staleBots.add(npc);
-        }
-        staleBots.forEach(NPC::destroy);
     }
 
     @Override
@@ -101,7 +103,10 @@ public class BotServiceImpl implements BotService {
 
     @Override
     public BotMatchSession getSession(Player player) {
-        return player == null ? null : playerSessions.get(player.getUniqueId());
+        if (player == null) return null;
+        // Native bots are indexed as match entities as well as Bukkit players.
+        BotMatchSession session = playerSessions.get(player.getUniqueId());
+        return session != null ? session : entitySessions.get(player.getUniqueId());
     }
 
     @Override
@@ -123,8 +128,8 @@ public class BotServiceImpl implements BotService {
             player.sendMessage(CC.translate("&cBot matches are disabled."));
             return false;
         }
-        if (!AlleyPlugin.getInstance().getServer().getPluginManager().isPluginEnabled("Citizens")) {
-            player.sendMessage(CC.translate("&cCitizens is required for bot matches."));
+        if (!NativeBotPlayer.isSupported()) {
+            player.sendMessage(CC.translate("&c" + NativeBotPlayer.unsupportedReason()));
             return false;
         }
 
@@ -166,8 +171,8 @@ public class BotServiceImpl implements BotService {
         try {
             started = session.start();
         } catch (RuntimeException exception) {
-            AlleyPlugin.getInstance().getLogger().severe(
-                    "Could not start a bot match for " + player.getName() + ": " + exception.getMessage());
+            AlleyPlugin.getInstance().getLogger().log(java.util.logging.Level.SEVERE,
+                    "Could not start a bot match for " + player.getName(), exception);
             started = false;
         }
         if (!started) {

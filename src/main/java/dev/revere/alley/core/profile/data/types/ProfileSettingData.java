@@ -95,6 +95,17 @@ public class ProfileSettingData {
     private boolean lobbyMusicEnabled;
     private boolean serverTitles;
     private boolean hidePlayersEnabled;
+    private boolean showMatchCps;
+    private boolean showMatchPing;
+    private boolean showMatchOpponent;
+    private boolean matchMvpMusicEnabled;
+    private boolean flyOnLoss;
+    private boolean flyOnWin;
+    private int queuePingRange;
+    private boolean swingSlowlyEnabled;
+    private boolean allowSpectators;
+    private boolean disablePublicChatWhenInMatch;
+    private boolean hideOtherSpectators;
     private String chatChannel;
     private String time;
 
@@ -113,8 +124,26 @@ public class ProfileSettingData {
         this.lobbyMusicEnabled = true;
         this.serverTitles = true;
         this.hidePlayersEnabled = false;
+        this.showMatchCps = false;
+        this.showMatchPing = true;
+        this.showMatchOpponent = true;
+        this.matchMvpMusicEnabled = true;
+        this.flyOnLoss = false;
+        this.flyOnWin = true;
+        this.queuePingRange = 0;
+        this.swingSlowlyEnabled = true;
+        this.allowSpectators = true;
+        this.disablePublicChatWhenInMatch = false;
+        this.hideOtherSpectators = false;
         this.chatChannel = ChatChannel.GLOBAL.toString();
         this.time = WorldTime.DEFAULT.getName();
+    }
+
+    /** Stores only the supported queue ping range values. */
+    public void setQueuePingRange(int queuePingRange) {
+        this.queuePingRange = queuePingRange == 30 || queuePingRange == 50
+                || queuePingRange == 100 || queuePingRange == 200
+                ? queuePingRange : 0;
     }
 
     /**

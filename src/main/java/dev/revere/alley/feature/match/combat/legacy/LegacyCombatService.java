@@ -6,12 +6,14 @@ import dev.revere.alley.feature.kit.setting.types.combat.*;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.BlocksAttacks;
 import org.bukkit.Bukkit;
+import org.bukkit.GameRule;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityRegainHealthEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scoreboard.Scoreboard;
@@ -27,6 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LegacyCombatService {
 
     private static final String LEGACY_COLLISION_TEAM = "alley_legacy_nc";
+    private static final double LEGACY_ATTACK_SPEED = 1024.0D;
+    private static final int LEGACY_NATURAL_REGEN_RATE = 80;
 
     private final Set<UUID> swordBlockKB = ConcurrentHashMap.newKeySet();
     private final Set<UUID> oldFood = ConcurrentHashMap.newKeySet();
@@ -34,11 +38,12 @@ public class LegacyCombatService {
     private final Set<UUID> oldEnchants = ConcurrentHashMap.newKeySet();
     private final Set<UUID> blocking = ConcurrentHashMap.newKeySet();
 
-    // Regen throttle
-    final Map<UUID, Long> lastSaturationHeal = new ConcurrentHashMap<>();
-    final Map<UUID, Long> lastNaturalHeal = new ConcurrentHashMap<>();
-    long tickCounter;
+    private final Map<UUID, Player> oldFoodPlayers = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> naturalRegenTimers = new ConcurrentHashMap<>();
+    private final Set<UUID> applyingNaturalHeal = ConcurrentHashMap.newKeySet();
     private BukkitRunnable tickTask;
+    private SweepAttackHandler sweepAttackHandler;
+    private AttackSoundSuppressor attackSoundSuppressor;
 
     // Unified hit delay — single tracker for all damage + knockback
     private final Map<UUID, Double> origAttackSpeed = new ConcurrentHashMap<>();
@@ -49,14 +54,24 @@ public class LegacyCombatService {
     public LegacyCombatService(AlleyPlugin plugin) { this.plugin = plugin; }
 
     public void start() {
-        tickTask = new BukkitRunnable() { public void run() {
-            tickCounter++;
-        }};
-        tickTask.runTaskTimer(plugin, 1, 1);
+        tickTask = new BukkitRunnable() {
+            @Override
+            public void run() {
+                tickOldFoodRegeneration();
+            }
+        };
+        tickTask.runTaskTimer(plugin, 1L, 1L);
+        sweepAttackHandler = new SweepAttackHandler(this);
+        sweepAttackHandler.enable();
+        attackSoundSuppressor = new AttackSoundSuppressor(this);
+        attackSoundSuppressor.enable();
     }
     public void stop() {
+        if (attackSoundSuppressor != null) { attackSoundSuppressor.disable(); attackSoundSuppressor = null; }
+        if (sweepAttackHandler != null) { sweepAttackHandler.disable(); sweepAttackHandler = null; }
         if (tickTask != null) { tickTask.cancel(); tickTask = null; }
         swordBlockKB.clear(); oldFood.clear(); oldOffhand.clear(); oldEnchants.clear();
+        oldFoodPlayers.clear(); naturalRegenTimers.clear(); applyingNaturalHeal.clear();
         blocking.clear(); origAttackSpeed.clear(); originalCollisionTeams.clear();
     }
 
@@ -65,6 +80,14 @@ public class LegacyCombatService {
         if (kit.isSettingEnabled(KitSettingOldFood.class)) applyOldFood(player);
         if (kit.isSettingEnabled(KitSettingOldOffhand.class)) applyOldOffhand(player);
         if (kit.isSettingEnabled(KitSettingOldEnchantments.class)) applyOldEnchants(player);
+    }
+
+    public boolean isKitApplied(Player player, Kit kit) {
+        UUID uniqueId = player.getUniqueId();
+        return (!kit.isSettingEnabled(KitSettingOldSwordBlocking.class) || hasSwordBlockKB(uniqueId))
+                && (!kit.isSettingEnabled(KitSettingOldFood.class) || hasOldFood(uniqueId))
+                && (!kit.isSettingEnabled(KitSettingOldOffhand.class) || hasOldOffhand(uniqueId))
+                && (!kit.isSettingEnabled(KitSettingOldEnchantments.class) || hasOldEnchants(uniqueId));
     }
 
     public void removeAll(Player player) {
@@ -94,6 +117,9 @@ public class LegacyCombatService {
         restoreAttackCooldown(p);
     }
     public boolean hasSwordBlockKB(UUID u) { return swordBlockKB.contains(u); }
+    public void suppressPearlTeleportSound(org.bukkit.Location from, org.bukkit.Location to) {
+        if (attackSoundSuppressor != null) attackSoundSuppressor.markPearlTeleport(from, to);
+    }
     public boolean isBlocking(UUID u) { return blocking.contains(u); }
     public void setBlocking(UUID u, boolean v) { if (v) blocking.add(u); else blocking.remove(u); }
 
@@ -144,7 +170,7 @@ public class LegacyCombatService {
     void removeAttackCooldown(Player p) {
         try {
             Attribute a = Registry.ATTRIBUTE.get(NamespacedKey.minecraft("attack_speed"));
-            if (a != null) { AttributeInstance ai = p.getAttribute(a); if (ai != null) { origAttackSpeed.put(p.getUniqueId(), ai.getBaseValue()); ai.setBaseValue(24.0); } }
+            if (a != null) { AttributeInstance ai = p.getAttribute(a); if (ai != null) { origAttackSpeed.put(p.getUniqueId(), ai.getBaseValue()); ai.setBaseValue(LEGACY_ATTACK_SPEED); } }
         } catch (Exception ignored) {}
     }
     private void restoreAttackCooldown(Player p) {
@@ -153,9 +179,53 @@ public class LegacyCombatService {
     }
 
     // ---- oldFood ----
-    void applyOldFood(Player p) { oldFood.add(p.getUniqueId()); }
-    void removeOldFood(Player p) { oldFood.remove(p.getUniqueId()); }
+    void applyOldFood(Player p) {
+        UUID uniqueId = p.getUniqueId();
+        boolean newlyEnabled = oldFood.add(uniqueId);
+        oldFoodPlayers.put(uniqueId, p);
+        if (newlyEnabled) naturalRegenTimers.put(uniqueId, 0);
+    }
+    void removeOldFood(Player p) {
+        UUID uniqueId = p.getUniqueId();
+        oldFood.remove(uniqueId);
+        oldFoodPlayers.remove(uniqueId);
+        naturalRegenTimers.remove(uniqueId);
+        applyingNaturalHeal.remove(uniqueId);
+    }
     public boolean hasOldFood(UUID u) { return oldFood.contains(u); }
+    boolean isApplyingNaturalHeal(UUID uniqueId) { return applyingNaturalHeal.contains(uniqueId); }
+
+    private void tickOldFoodRegeneration() {
+        for (Map.Entry<UUID, Player> entry : oldFoodPlayers.entrySet()) {
+            UUID uniqueId = entry.getKey();
+            Player player = entry.getValue();
+            Boolean naturalRegeneration = player.getWorld().getGameRuleValue(GameRule.NATURAL_REGENERATION);
+            boolean canHeal = Boolean.TRUE.equals(naturalRegeneration)
+                    && !player.isDead()
+                    && player.getFoodLevel() >= 18
+                    && player.getHealth() > 0.0
+                    && player.getHealth() < player.getMaxHealth();
+            if (!canHeal) {
+                naturalRegenTimers.put(uniqueId, 0);
+                continue;
+            }
+
+            int timer = naturalRegenTimers.merge(uniqueId, 1, Integer::sum);
+            if (timer < LEGACY_NATURAL_REGEN_RATE) continue;
+            naturalRegenTimers.put(uniqueId, 0);
+
+            double healthBefore = player.getHealth();
+            applyingNaturalHeal.add(uniqueId);
+            try {
+                player.heal(1.0, EntityRegainHealthEvent.RegainReason.REGEN);
+            } finally {
+                applyingNaturalHeal.remove(uniqueId);
+            }
+            if (player.getHealth() > healthBefore) {
+                player.setExhaustion(Math.min(40.0F, player.getExhaustion() + 3.0F));
+            }
+        }
+    }
 
     // ---- oldOffhandSounds ----
     void applyOldOffhand(Player p) {

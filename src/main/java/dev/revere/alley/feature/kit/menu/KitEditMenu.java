@@ -70,6 +70,7 @@ public class KitEditMenu extends Menu {
         if (this.kit.isSettingEnabled(KitSettingHideAndSeek.class)) {
             buttons.put(39, new HideAndSeekKitsButton(this.kit));
         }
+        buttons.put(41, new SkyWarsResourceKitButton(this.kit));
 
         // Row 5: Kit Settings, Knockback Profile, FFA
         // 第5行：工具包设置、击退配置、FFA
@@ -542,6 +543,38 @@ public class KitEditMenu extends Menu {
                 new HideAndSeekKitSelectionMenu(this.kit, false).openMenu(player);
                 this.playNeutral(player);
             }
+        }
+    }
+
+    private static class SkyWarsResourceKitButton extends Button {
+        private final Kit kit;
+
+        public SkyWarsResourceKitButton(Kit kit) {
+            this.kit = kit;
+        }
+
+        @Override
+        public ItemStack getButtonItem(Player player) {
+            String resourceKit = this.kit.getSkyWarsResourceKit();
+            return new ItemBuilder(Material.CHEST)
+                    .name("&b&lSkyWars Resource Kit")
+                    .lore(
+                            CC.MENU_BAR,
+                            "&7Selected: &f" + (resourceKit == null || resourceKit.isEmpty() ? "Not Set" : resourceKit),
+                            "",
+                            "&eClick &7to select the Kit whose items",
+                            "&7will be randomly placed in SkyWars chests.",
+                            CC.MENU_BAR
+                    )
+                    .hideMeta()
+                    .build();
+        }
+
+        @Override
+        public void clicked(Player player, ClickType clickType) {
+            if (clickType != ClickType.LEFT) return;
+            new SkyWarsResourceKitSelectionMenu(this.kit).openMenu(player);
+            this.playNeutral(player);
         }
     }
 

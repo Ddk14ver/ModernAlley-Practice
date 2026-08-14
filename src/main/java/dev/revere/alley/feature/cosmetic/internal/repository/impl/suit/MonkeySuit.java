@@ -15,11 +15,8 @@ import java.util.Map;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project alley-practice
- * 项目：alley-practice
  * @date 6/08/2025
- * 日期：2025年6月8日
  */
 @CosmeticData(
         type = CosmeticType.SUIT,

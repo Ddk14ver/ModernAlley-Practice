@@ -12,16 +12,16 @@ import java.util.Map;
 
 /** Removes the modern shooter-motion inheritance from legacy projectiles. */
 final class LegacyProjectileVelocity {
-    private Method getHandleMethod;
-    private Method getKnownMovementMethod;
-    private Method levelMethod;
-    private Method paperConfigMethod;
-    private Method vectorXMethod;
-    private Method vectorYMethod;
-    private Method vectorZMethod;
-    private Method setDeltaMovementMethod;
-    private Field miscField;
-    private Field disableRelativeVelocityField;
+    private final Map<Class<?>, Method> getHandleMethods = new HashMap<>();
+    private final Map<Class<?>, Method> getKnownMovementMethods = new HashMap<>();
+    private final Map<Class<?>, Method> levelMethods = new HashMap<>();
+    private final Map<Class<?>, Method> paperConfigMethods = new HashMap<>();
+    private final Map<Class<?>, Method> vectorXMethods = new HashMap<>();
+    private final Map<Class<?>, Method> vectorYMethods = new HashMap<>();
+    private final Map<Class<?>, Method> vectorZMethods = new HashMap<>();
+    private final Map<Class<?>, Method> setDeltaMovementMethods = new HashMap<>();
+    private final Map<Class<?>, Field> miscFields = new HashMap<>();
+    private final Map<Class<?>, Field> disableRelativeVelocityFields = new HashMap<>();
     private final Map<Class<?>, Method> projectileGetHandleMethods = new HashMap<>();
     private boolean warningLogged;
 
@@ -31,9 +31,10 @@ final class LegacyProjectileVelocity {
             if (isGloballyDisabled(handle)) return;
 
             Object movement = getKnownMovement(handle);
-            double x = ((Number) this.vectorXMethod.invoke(movement)).doubleValue();
-            double y = ((Number) this.vectorYMethod.invoke(movement)).doubleValue();
-            double z = ((Number) this.vectorZMethod.invoke(movement)).doubleValue();
+            Class<?> movementClass = movement.getClass();
+            double x = ((Number) method(this.vectorXMethods, movementClass, "x").invoke(movement)).doubleValue();
+            double y = ((Number) method(this.vectorYMethods, movementClass, "y").invoke(movement)).doubleValue();
+            double z = ((Number) method(this.vectorZMethods, movementClass, "z").invoke(movement)).doubleValue();
             if (Double.isNaN(x) || Double.isNaN(y) || Double.isNaN(z)) return;
 
             Vector velocity = projectile.getVelocity();
@@ -56,52 +57,46 @@ final class LegacyProjectileVelocity {
             this.projectileGetHandleMethods.put(projectileClass, projectileGetHandleMethod);
         }
         Object projectileHandle = projectileGetHandleMethod.invoke(projectile);
-        if (this.setDeltaMovementMethod == null) {
-            this.setDeltaMovementMethod = projectileHandle.getClass().getMethod(
-                    "setDeltaMovement", double.class, double.class, double.class);
-        }
-        this.setDeltaMovementMethod.invoke(
+        Method setDeltaMovementMethod = method(this.setDeltaMovementMethods, projectileHandle.getClass(),
+                "setDeltaMovement", double.class, double.class, double.class);
+        setDeltaMovementMethod.invoke(
                 projectileHandle, velocity.getX(), velocity.getY(), velocity.getZ());
     }
 
     private Object getHandle(Player shooter) throws ReflectiveOperationException {
-        if (this.getHandleMethod == null) {
-            this.getHandleMethod = shooter.getClass().getMethod("getHandle");
-        }
-        return this.getHandleMethod.invoke(shooter);
+        return method(this.getHandleMethods, shooter.getClass(), "getHandle").invoke(shooter);
     }
 
     private Object getKnownMovement(Object handle) throws ReflectiveOperationException {
-        if (this.getKnownMovementMethod == null) {
-            this.getKnownMovementMethod = handle.getClass().getMethod("getKnownMovement");
-        }
-        Object movement = this.getKnownMovementMethod.invoke(handle);
-        if (this.vectorXMethod == null) {
-            Class<?> vectorType = movement.getClass();
-            this.vectorXMethod = vectorType.getMethod("x");
-            this.vectorYMethod = vectorType.getMethod("y");
-            this.vectorZMethod = vectorType.getMethod("z");
-        }
-        return movement;
+        return method(this.getKnownMovementMethods, handle.getClass(), "getKnownMovement").invoke(handle);
     }
 
     private boolean isGloballyDisabled(Object handle) throws ReflectiveOperationException {
-        if (this.levelMethod == null) {
-            this.levelMethod = handle.getClass().getMethod("level");
-        }
-        Object level = this.levelMethod.invoke(handle);
-        if (this.paperConfigMethod == null) {
-            this.paperConfigMethod = level.getClass().getMethod("paperConfig");
-        }
-        Object worldConfig = this.paperConfigMethod.invoke(level);
-        if (this.miscField == null) {
-            this.miscField = worldConfig.getClass().getField("misc");
-        }
-        Object misc = this.miscField.get(worldConfig);
-        if (this.disableRelativeVelocityField == null) {
-            this.disableRelativeVelocityField = misc.getClass().getField("disableRelativeProjectileVelocity");
-        }
-        return this.disableRelativeVelocityField.getBoolean(misc);
+        Object level = method(this.levelMethods, handle.getClass(), "level").invoke(handle);
+        Object worldConfig = method(this.paperConfigMethods, level.getClass(), "paperConfig").invoke(level);
+        Field miscField = field(this.miscFields, worldConfig.getClass(), "misc");
+        Object misc = miscField.get(worldConfig);
+        Field disabledField = field(this.disableRelativeVelocityFields, misc.getClass(),
+                "disableRelativeProjectileVelocity");
+        return disabledField.getBoolean(misc);
+    }
+
+    private Method method(Map<Class<?>, Method> methods, Class<?> type, String name,
+                          Class<?>... parameterTypes) throws NoSuchMethodException {
+        Method cached = methods.get(type);
+        if (cached != null) return cached;
+        Method resolved = type.getMethod(name, parameterTypes);
+        methods.put(type, resolved);
+        return resolved;
+    }
+
+    private Field field(Map<Class<?>, Field> fields, Class<?> type, String name)
+            throws NoSuchFieldException {
+        Field cached = fields.get(type);
+        if (cached != null) return cached;
+        Field resolved = type.getField(name);
+        fields.put(type, resolved);
+        return resolved;
     }
 
     private void logWarning(ReflectiveOperationException exception) {

@@ -6,11 +6,8 @@ import org.bukkit.Material;
 
 /**
  * @author Remi
- * @author 作者 Remi
  * @project alley-practice
- * @project 项目 alley-practice
  * @date 27/06/2025
- * @date 日期 27/06/2025
  */
 @CosmeticData(
         type = CosmeticType.KILL_MESSAGE,

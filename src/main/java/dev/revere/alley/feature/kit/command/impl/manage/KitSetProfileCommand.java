@@ -3,6 +3,7 @@ package dev.revere.alley.feature.kit.command.impl.manage;
 import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
@@ -42,6 +43,7 @@ public class KitSetProfileCommand extends BaseCommand {
         }
 
         kit.setKnockbackProfile(args[1]);
+        this.plugin.getService(KnockbackManager.class).synchronizeKitHitDelay(kit);
         kitService.saveKit(kit);
         player.sendMessage(this.getString(GlobalMessagesLocaleImpl.KIT_KB_PROFILE_SET)
                 .replace("{kb-profile}", args[1])

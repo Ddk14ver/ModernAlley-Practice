@@ -1,0 +1,51 @@
+# Timezone used for daily and weekly challenge boundaries.
+timezone: "Asia/Hong_Kong"
+
+menu:
+  title: "&6&lChallenges"
+  daily-header: "&e&lDaily Challenges"
+  weekly-header: "&6&lWeekly Challenges"
+  status:
+    available: "&aLeft-click to accept this challenge."
+    active: "&eChallenge in progress."
+    completed: "&aChallenge completed and rewarded."
+  messages:
+    accepted: "&aAccepted {task}&a!"
+    already-accepted: "&cYou have already accepted this challenge."
+
+messages:
+  # Sent in the player's lower-left chat area when a challenge is completed.
+  completed:
+    - ""
+    - "&6&lCHALLENGE COMPLETE &8| &f{task}"
+    - "&7Completed: &a{progress}/{requirement} {type} &8| &6+{reward} coins"
+    - ""
+
+# Every configurable requirement and reward value below is shown on its task paper.
+tasks:
+  daily:
+    kills:
+      name: "&c&lDaily Kill Challenge"
+      requirement: 20
+      reward-coins: 100
+    wins:
+      name: "&a&lDaily Win Challenge"
+      requirement: 5
+      reward-coins: 100
+    elo:
+      name: "&b&lDaily Elo Challenge"
+      requirement: 50
+      reward-coins: 100
+  weekly:
+    kills:
+      name: "&c&lWeekly Kill Challenge"
+      requirement: 100
+      reward-coins: 500
+    wins:
+      name: "&a&lWeekly Win Challenge"
+      requirement: 25
+      reward-coins: 500
+    elo:
+      name: "&b&lWeekly Elo Challenge"
+      requirement: 250
+      reward-coins: 500

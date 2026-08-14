@@ -99,4 +99,6 @@ public interface ConfigService extends Service {
 
     FileConfiguration getSpigotCommunityMessagesConfig();
 
+    FileConfiguration getChallengesConfig();
+
 }

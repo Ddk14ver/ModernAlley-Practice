@@ -3,6 +3,7 @@ package dev.revere.alley.feature.bot.match;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.common.PlayerUtil;
 import dev.revere.alley.common.PotionUtil;
+import dev.revere.alley.common.text.CC;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.enums.ProfileState;
@@ -11,17 +12,27 @@ import dev.revere.alley.feature.arena.ArenaService;
 import dev.revere.alley.feature.arena.internal.types.StandAloneArena;
 import dev.revere.alley.feature.bot.BotAiMode;
 import dev.revere.alley.feature.bot.BotDifficultyProfile;
+import dev.revere.alley.feature.bot.entity.NativeBotPlayer;
 import dev.revere.alley.feature.bot.internal.BotServiceImpl;
 import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.hotbar.HotbarService;
 import dev.revere.alley.feature.hotbar.HotbarType;
 import dev.revere.alley.feature.kit.Kit;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingBreakArenaBlocksImpl;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingBuildImpl;
+import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingDisableSwimmingImpl;
+import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingVoidDeathImpl;
+import dev.revere.alley.feature.kit.setting.types.mode.KitSettingSpleef;
+import dev.revere.alley.feature.kit.setting.types.mode.KitSettingSumo;
 import dev.revere.alley.feature.knockback.KnockbackManager;
+import dev.revere.alley.feature.knockback.KnockbackProfile;
+import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import dev.revere.alley.feature.knockback.listener.PotionMotionListener;
+import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.match.listener.MatchListener;
 import dev.revere.alley.feature.match.combat.legacy.LegacyProjectileData;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
 import dev.revere.alley.feature.match.internal.types.DefaultMatch;
@@ -30,7 +41,6 @@ import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.snapshot.SnapshotService;
 import dev.revere.alley.feature.queue.Queue;
 import dev.revere.alley.feature.queue.QueueService;
-import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.feature.music.MusicService;
 import dev.revere.alley.feature.party.Party;
 import dev.revere.alley.feature.party.PartyService;
@@ -38,9 +48,6 @@ import dev.revere.alley.feature.spawn.SpawnService;
 import dev.revere.alley.feature.visibility.VisibilityService;
 import dev.revere.alley.library.assemble.AssembleService;
 import lombok.Getter;
-import net.citizensnpcs.api.CitizensAPI;
-import net.citizensnpcs.api.npc.NPC;
-import net.citizensnpcs.api.trait.trait.Equipment;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
@@ -55,8 +62,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,21 +80,25 @@ public final class BotMatchSession {
     private static final int DOWNWARD_HEAL_WINDUP_TICKS = 2;
     private static final int TURN_HEAL_WINDUP_TICKS = 8;
     private static final int HEAL_RECOVERY_TICKS = 2;
+    private static final int TURN_HEAL_RECOVERY_TICKS = 20;
     private static final int HEAL_ACTION_TIMEOUT_TICKS = 20;
     private static final int GOLDEN_APPLE_USE_TICKS = 32;
     private static final int BUFF_POTION_USE_TICKS = 32;
-    private static final int BOW_CHARGE_TICKS = 20;
+    private static final int BOW_CHARGE_TICKS = 18;
     private static final int BOW_USE_DURATION_TICKS = 72_000;
+    private static final int BLOCK_AIM_TICKS = 2;
+    private static final int BLOCK_PLACE_INTERVAL_TICKS = 2;
+    private static final int BLOCK_WEAPON_RETURN_TICKS = 2;
+    private static final int ROD_WEAPON_RETURN_TICKS = 4;
+    private static final int ROD_MAX_LIFETIME_TICKS = 20;
+    private static final double ARROW_DRAG = 0.99D;
+    private static final double ARROW_GRAVITY = 0.05D;
     private static final int GOLDEN_APPLE_REUSE_DELAY_TICKS = 60;
     private static final int BUFF_POTION_REFRESH_WINDOW_TICKS = 100;
     private static final int BUFF_POTION_CHECK_INTERVAL_TICKS = 20;
     private static final double EATING_SPEED_MULTIPLIER = 0.2D;
     private static final int DEATH_EFFECT_DELAY_TICKS = 2;
-    private static final int DEATH_ANIMATION_TICKS = 20;
-    private static final double SPRINT_SPEED_MULTIPLIER = 1.3D;
-    private static final double ATTACK_INPUT_KB_MULTIPLIER = 0.6D;
-    private static final int POST_HIT_INPUT_DAMPING_TICKS = 6;
-
+    private static final int BOT_REMOVE_DELAY_TICKS = 10;
     private final BotServiceImpl service;
     private final Player player;
     private final Kit kit;
@@ -95,10 +108,11 @@ public final class BotMatchSession {
     private final int countdownTicks;
     private final int timeLimitTicks;
     private final int returnDelayTicks;
+    private final boolean debug;
     private final Map<Location, BlockState> changedBlocks = new LinkedHashMap<>();
     private final List<Projectile> spawnedProjectiles = new java.util.ArrayList<>();
 
-    private NPC npc;
+    private NativeBotPlayer nativeBot;
     private Player bot;
     private BukkitTask task;
     private BukkitTask returnTask;
@@ -116,8 +130,17 @@ public final class BotMatchSession {
     private int nextRodTick;
     private int nextLavaTick;
     private int nextHealTick;
+    private int nextDebuffTick;
+    private int nextBlockTick;
     private int nextBuffPotionCheckTick;
     private int removeRodTick;
+    private int rodWeaponReturnTick;
+    private boolean holdingRod;
+    private int buildingSlot = -1;
+    private int nextBuildPlacementTick;
+    private int buildWeaponReturnTick;
+    private int buildTargetIndex;
+    private List<Location> buildTargets = List.of();
     private int healingPotionSlot = -1;
     private int healingThrowTick;
     private int healingActionDeadlineTick;
@@ -136,10 +159,10 @@ public final class BotMatchSession {
     private ItemStack healingPotion;
     private Vector healingEscapeDirection;
     private double attackProgress;
-    private long lastCombatSwingTick = Long.MIN_VALUE;
-    private long pendingMeleeKnockbackTick = Long.MIN_VALUE;
-    private long lastIncomingMeleeTick = Long.MIN_VALUE;
+    private int attackAttemptSequence;
+    private int acceptedAttackSequence;
     private float originalWalkSpeed;
+    private double strafeDirection = 1.0D;
 
     public BotMatchSession(BotServiceImpl service, Player player, Kit kit, Arena arena,
                            BotDifficultyProfile difficulty, FileConfiguration config) {
@@ -152,9 +175,51 @@ public final class BotMatchSession {
         this.countdownTicks = Math.max(0, config.getInt("countdown-seconds", 3)) * 20;
         this.timeLimitTicks = Math.max(30, config.getInt("match-time-limit-seconds", 300)) * 20;
         this.returnDelayTicks = Math.max(0, config.getInt("return-to-lobby-delay-seconds", 3)) * 20;
+        this.debug = config.getBoolean("debug", false);
     }
 
     public boolean start() {
+        if (this.arena instanceof StandAloneArena standalone
+                && !standalone.getSpawnReadyFuture().isDone()) {
+            standalone.getSpawnReadyFuture().whenComplete((ignored, throwable) ->
+                    Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+                        if (throwable != null || !this.player.isOnline()) {
+                            if (this.player.isOnline()) {
+                                if (throwable != null) {
+                                    AlleyPlugin.getInstance().getLogger().log(java.util.logging.Level.SEVERE,
+                                            "Could not prepare a bot arena for " + this.player.getName(), throwable);
+                                }
+                                this.abortStart();
+                                this.player.sendMessage(CC.translate("&cThe bot match could not be started."));
+                            } else {
+                                if (this.arena instanceof StandAloneArena readyArena) {
+                                    AlleyPlugin.getInstance().getService(ArenaService.class)
+                                            .deleteTemporaryArena(readyArena);
+                                }
+                                this.service.complete(this);
+                            }
+                            return;
+                        }
+                        try {
+                            if (!this.startInternal()) {
+                                this.abortStart();
+                                this.player.sendMessage(CC.translate("&cThe bot match could not be started."));
+                            }
+                        } catch (RuntimeException exception) {
+                            AlleyPlugin.getInstance().getLogger().log(java.util.logging.Level.SEVERE,
+                                    "Could not start a bot match for " + this.player.getName(), exception);
+                            this.abortStart();
+                            if (this.player.isOnline()) {
+                                this.player.sendMessage(CC.translate("&cThe bot match could not be started."));
+                            }
+                        }
+                    }));
+            return true;
+        }
+        return startInternal();
+    }
+
+    private boolean startInternal() {
         this.originalWalkSpeed = player.getWalkSpeed();
         PlayerUtil.reset(player, true, true);
         Profile humanProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
@@ -162,14 +227,8 @@ public final class BotMatchSession {
 
         String botName = "Bot_" + difficulty.getId();
         if (botName.length() > 16) botName = botName.substring(0, 16);
-        this.npc = CitizensAPI.getNPCRegistry().createNPC(EntityType.PLAYER, botName);
-        this.npc.data().set(NPC.Metadata.SHOULD_SAVE, false);
-        this.npc.data().set(NPC.Metadata.RESPAWN_DELAY, 100);
-        this.npc.data().set("alley-bot", true);
-        this.npc.setProtected(true);
-        if (!this.npc.spawn(arena.getPos2())) return false;
-        if (!(this.npc.getEntity() instanceof Player spawnedBot)) return false;
-        this.bot = spawnedBot;
+        this.nativeBot = NativeBotPlayer.spawn(arena.getPos2(), botName, difficulty.getPing());
+        this.bot = nativeBot.player();
         this.bot.addScoreboardTag(BOT_ENTITY_TAG);
 
         Profile botProfile = new Profile(bot.getUniqueId(), botName);
@@ -195,9 +254,13 @@ public final class BotMatchSession {
             setupBot();
             applyCombatSystems();
             Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-                if (!this.ended && this.npc != null && this.npc.isSpawned()) syncBotEquipment();
+                if (!this.ended && this.nativeBot != null && this.nativeBot.isSpawned()) {
+                    this.nativeBot.refreshTrackingFor(this.player);
+                    syncBotEquipment();
+                }
             }, 2L);
         }
+        this.nativeBot.refreshTrackingFor(this.player);
         this.task = Bukkit.getScheduler().runTaskTimer(AlleyPlugin.getInstance(), this::tick, 1L, 1L);
         return true;
     }
@@ -214,10 +277,21 @@ public final class BotMatchSession {
         GameParticipant<MatchGamePlayer> computer = new GameParticipant<>(
                 new MatchGamePlayer(this.bot.getUniqueId(), botProfile.getName()));
 
-        this.matchContext = new DefaultMatch(queue, this.kit, this.arena, false, human, computer);
+        MatchService matchService = AlleyPlugin.getInstance().getService(MatchService.class);
+        // Gomoku has a dedicated BotGomokuGame (rather than the normal two-player
+        // turn engine), so it keeps a plain context; every combat bot mode is
+        // selected through MatchService's setting-based factory below.
+        Match createdMatch = this.aiMode == BotAiMode.GOMOKU
+                ? new DefaultMatch(queue, this.kit, this.arena, false, human, computer)
+                : matchService.createMatch(queue, this.kit, this.arena, false, human, computer);
+        if (!(createdMatch instanceof DefaultMatch defaultMatch)) {
+            throw new IllegalStateException("Bot matches require a two-participant DefaultMatch subtype, got "
+                    + createdMatch.getClass().getSimpleName());
+        }
+        this.matchContext = defaultMatch;
         this.matchContext.setAffectStatistics(false);
         this.matchContext.setTeamMatch(false);
-        AlleyPlugin.getInstance().getService(MatchService.class).addMatch(this.matchContext);
+        matchService.addMatch(this.matchContext);
 
         humanProfile.setState(ProfileState.PLAYING);
         humanProfile.setMatch(this.matchContext);
@@ -235,74 +309,132 @@ public final class BotMatchSession {
     }
 
     private void setupBot() {
-        bot.getInventory().clear();
-        bot.getInventory().setContents(cloneItems(kit.getItems()));
+        // Match#startMatch normally resolves the Bot through MatchGamePlayer's
+        // Bukkit#getEntity fallback. Keep a defensive direct setup for the small
+        // spawn-registration race on the first Bot match only.
+        if (!this.matchContext.isPlayerInitialized(bot.getUniqueId())) {
+            this.matchContext.setupPlayer(bot);
+        }
         bot.getInventory().setArmorContents(cloneItems(kit.getArmor()));
         bot.setHealth(bot.getMaxHealth());
         bot.setFoodLevel(20);
         bot.setSaturation(5.0F);
         bot.setGameMode(GameMode.SURVIVAL);
+        bot.setInvulnerable(false);
+        bot.setNoDamageTicks(0);
+        bot.setWalkSpeed(0.2F);
         bot.setSprinting(true);
-        kit.applyPotionEffects(bot);
         this.matchContext.applyColorKit(bot);
         selectCombatItem();
         syncBotEquipment();
 
-        if (this.aiMode != BotAiMode.GOMOKU) {
-            npc.getNavigator().getDefaultParameters()
-                    .baseSpeed(1.0F)
-                    .speedModifier((float) getCombatMovementSpeed())
-                    .range(128.0F)
-                    .distanceMargin(0.0D)
-                    .straightLineTargetingDistance(128.0F)
-                    .stuckAction(null)
-                    .updatePathRate(1);
-            npc.data().setPersistent("disable-default-stuck-action", true);
-            npc.data().setPersistent("collidable", false);
-        }
+        bot.setCollidable(true);
     }
 
     private void applyCombatSystems() {
         KnockbackManager knockbackManager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        knockbackManager.getPlayerData(bot).setServerControlled(true);
         knockbackManager.applyKnockback(player, kit);
         knockbackManager.applyKnockback(bot, kit);
+        traceCombatProfile(knockbackManager);
 
         MatchService matchService = AlleyPlugin.getInstance().getService(MatchService.class);
         if (matchService instanceof MatchServiceImpl impl && impl.getLegacyCombatService() != null) {
+            // Reconcile the exact kit state instead of retaining disabled legacy
+            // settings left behind by a previous match or an early Bot setup pass.
+            impl.getLegacyCombatService().removeAll(player);
+            impl.getLegacyCombatService().removeAll(bot);
             impl.getLegacyCombatService().applyKit(player, kit);
             impl.getLegacyCombatService().applyKit(bot, kit);
         }
     }
 
+    private void traceCombatProfile(KnockbackManager manager) {
+        if (!this.debug) return;
+
+        PlayerKnockbackData data = manager.getPlayerData(bot);
+        KnockbackProfile profile = manager.getProfile(data.getProfileName());
+        if (profile == null) profile = manager.getDefaultProfile();
+        if (profile == null) {
+            trace("No KB profile resolved for kitProfile=" + kit.getKnockbackProfile());
+            return;
+        }
+
+        trace("entityClass=" + bot.getClass().getName()
+                + " match=" + matchContext.getClass().getSimpleName()
+                + " kitProfile=" + kit.getKnockbackProfile()
+                + " resolvedProfile=" + profile.getName()
+                + " horizontal=" + profile.getHorizontalGround() + "/" + profile.getHorizontalAir()
+                + " vertical=" + profile.getVerticalGround() + "/" + profile.getVerticalAir()
+                + " interactionRange=" + profile.getEntityInteractionRange()
+                + " disableDownward=" + profile.isDisableDownwardKb()
+                + " misplace=" + profile.isPacketMisplaceEnabled()
+                + " packetDelay=" + profile.isPacketDelayEnabled()
+                + ":" + profile.getPacketDelayTicks());
+    }
+
     private void tick() {
-        if (ended || !player.isOnline() || bot == null || !npc.isSpawned()) {
+        if (ended || !player.isOnline() || bot == null || nativeBot == null || !nativeBot.isSpawned()) {
             if (!ended) finish(false);
             return;
         }
 
         ticks++;
         if (!running) {
+            nativeBot.clearMovementInput();
+            nativeBot.tick();
+            if (ticks <= 40 || ticks % 20 == 0) nativeBot.refreshTrackingFor(player);
             tickCountdown();
             return;
         }
+
+        tickBotPlayerBridge();
+        tickRunningBehavior();
+        if (ended || !nativeBot.isSpawned()) return;
+
+        // The input selected above must be present when ServerPlayer#doTick
+        // runs. Ticking first delayed W/strafe by a frame and allowed W-tap to
+        // clear the next frame's input before it was ever applied.
+        nativeBot.tick();
+        AlleyPlugin.getInstance().getService(KnockbackManager.class).updateMovementState(bot);
+        if (ticks <= 40 || ticks % 20 == 0) nativeBot.refreshTrackingFor(player);
+    }
+
+    private void tickRunningBehavior() {
         runningTicks++;
         if (runningTicks >= timeLimitTicks) {
             finish(false);
             return;
         }
-        if (player.isDead()) return;
+        if (player.isDead()) {
+            nativeBot.clearMovementInput();
+            return;
+        }
+        applyBotMovementSettings();
         if (isBelowArena(player)) {
             finish(false);
             return;
         }
-        if (isBelowArena(bot)) {
+        if (isBotMovementEliminated()) {
             finish(true);
             return;
         }
 
         if (this.aiMode == BotAiMode.GOMOKU) {
+            nativeBot.clearMovementInput();
             if (this.gomokuGame != null) this.gomokuGame.tick();
             return;
+        }
+
+        if (this.goldenAppleSlot >= 0) {
+            tickGoldenAppleUse();
+            return;
+        }
+
+        if (needsPriorityHealing()) {
+            interruptForPriorityHealing();
+            if (tryGoldenApple()) return;
+            if (this.aiMode == BotAiMode.POTPVP && tryHeal()) return;
         }
 
         if (this.buffPotionSlot >= 0) {
@@ -310,15 +442,97 @@ public final class BotMatchSession {
             return;
         }
         if (!this.openingPotionsConsumed) {
-            if (this.runningTicks < OPENING_BUFF_DELAY_TICKS) return;
+            if (this.runningTicks < OPENING_BUFF_DELAY_TICKS) {
+                nativeBot.clearMovementInput();
+                return;
+            }
             if (beginBuffPotionUse()) return;
         } else if (this.ticks >= this.nextBuffPotionCheckTick) {
             if (beginBuffPotionUse()) return;
         }
-        if (this.aiMode == BotAiMode.POTPVP && tryHeal()) return;
-        if (this.aiMode == BotAiMode.BUILDUHC && tryBuildUhcAction()) return;
+        if (this.aiMode == BotAiMode.POTPVP) {
+            if (tryHeal()) return;
+            if (tryDebuffPotion()) return;
+        }
+        if (this.aiMode == BotAiMode.BUILDUHC) {
+            if (tryExtinguishFire()) return;
+            if (tryBuildUhcAction()) return;
+        }
         updateNavigation();
         tryAttack();
+    }
+
+    private void applyBotMovementSettings() {
+        if (kit.isSettingEnabled(KitSettingDisableSwimmingImpl.class)
+                && (bot.isSwimming() || bot.getPose() == Pose.SWIMMING)) {
+            bot.setSwimming(false);
+            bot.setPose(Pose.STANDING, true);
+        }
+    }
+
+    private boolean isBotMovementEliminated() {
+        if ((kit.isSettingEnabled(KitSettingSumo.class)
+                || kit.isSettingEnabled(KitSettingSpleef.class))
+                && bot.getLocation().getBlock().getType() == Material.WATER) {
+            return true;
+        }
+        if (arena instanceof StandAloneArena standalone
+                && kit.isSettingEnabled(KitSettingVoidDeathImpl.class)
+                && bot.getLocation().getY() <= standalone.getVoidLevel()) {
+            return true;
+        }
+        return isBelowArena(bot);
+    }
+
+    /** Supplies movement-state tracking and pending KB velocity delivery. */
+    private void tickBotPlayerBridge() {
+        KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        manager.updateMovementState(bot);
+
+        PlayerKnockbackData data = manager.getPlayerData(bot);
+        long pendingNativeTick = data.getPendingNativeProjectileVelocityTick();
+        boolean nativeProjectilePending = pendingNativeTick != Long.MIN_VALUE
+                && manager.getCurrentTick() >= pendingNativeTick
+                && manager.getCurrentTick() - pendingNativeTick <= 1L;
+        Vector applied = manager.deliverPendingKnockback(bot);
+        if (applied != null) {
+            bot.setVelocity(applied);
+            handleKnockbackApplied(applied, "bot-tick");
+        } else if (nativeProjectilePending) {
+            Vector nativeVelocity = bot.getVelocity();
+            if (nativeVelocity.getY() < 0.0D) {
+                KnockbackProfile profile = manager.getProfile(data.getProfileName());
+                if (profile == null) profile = manager.getDefaultProfile();
+                if (profile != null && profile.isDisableDownwardKb()) {
+                    nativeVelocity = nativeVelocity.clone().setY(0.0D);
+                    bot.setVelocity(nativeVelocity);
+                }
+            }
+            handleKnockbackApplied(nativeVelocity, "bot-tick-native");
+        }
+    }
+
+    public void handleKnockbackApplied(Vector velocity, String source) {
+        if (this.ended || this.bot == null) return;
+
+        PlayerKnockbackData data = AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .getPlayerData(bot);
+        if (this.debug) {
+            trace("KB applied via " + source + " profile=" + data.getProfileName()
+                    + " ground=" + bot.isOnGround() + " velocity=" + formatVector(velocity));
+        }
+    }
+
+    public void handleKnockbackMiss(String source, Vector nativeVelocity) {
+        if (!this.debug || this.bot == null) return;
+
+        PlayerKnockbackData data = AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .getPlayerData(bot);
+        trace("KB bridge miss via " + source + " profile=" + data.getProfileName()
+                + " pending=" + (data.getVelocity() == null
+                ? "null" : formatVector(data.getVelocity()))
+                + " nativeMarker=" + data.getPendingNativeProjectileVelocityTick()
+                + " native=" + formatVector(nativeVelocity));
     }
 
     private void tickCountdown() {
@@ -338,14 +552,16 @@ public final class BotMatchSession {
         bot.setVelocity(new Vector());
         bot.setFallDistance(0.0F);
         bot.setGravity(true);
-        npc.setProtected(false);
-        npc.data().setPersistent("protected", false);
+        bot.setInvulnerable(false);
+        bot.setNoDamageTicks(0);
         player.setWalkSpeed(originalWalkSpeed <= 0.0F ? 0.2F : originalWalkSpeed);
         if (this.aiMode == BotAiMode.GOMOKU) {
             this.gomokuGame = new BotGomokuGame(this);
             this.gomokuGame.start();
         } else {
-            updateNavigationTarget();
+            applyCombatSystems();
+            nativeBot.refreshTrackingFor(player);
+            syncBotEquipment();
         }
     }
 
@@ -357,7 +573,7 @@ public final class BotMatchSession {
         ItemStack[] contents = bot.getInventory().getStorageContents();
         for (int slot = 0; slot < contents.length; slot++) {
             ItemStack item = contents[slot];
-            if (item == null || !isPotionItem(item.getType())) continue;
+            if (item == null || item.getType() != Material.POTION) continue;
 
             List<PotionEffect> effects = PotionUtil.getPotionEffects(item);
             if (effects.isEmpty() || effects.stream().anyMatch(effect -> !isOpeningBuff(effect))) continue;
@@ -393,8 +609,10 @@ public final class BotMatchSession {
     }
 
     private void finishBuffPotionUse(boolean completeUse) {
+        boolean completedNatively = completeUse && bot.hasActiveItem();
+        if (completedNatively) bot.completeUsingActiveItem();
         stopUsingHeldItem();
-        if (completeUse) {
+        if (completeUse && !completedNatively) {
             this.buffPotionEffects.forEach(effect -> bot.addPotionEffect(effect, true));
             consumeOne(this.buffPotionSlot);
             bot.getWorld().playSound(bot.getLocation(), Sound.ENTITY_GENERIC_DRINK, 1.0F, 1.0F);
@@ -427,7 +645,7 @@ public final class BotMatchSession {
 
     private boolean isOpeningBuff(PotionEffect effect) {
         return switch (effect.getType().getKey().getKey()) {
-            case "speed", "haste", "strength", "jump_boost", "resistance", "fire_resistance",
+            case "speed", "haste", "strength", "jump_boost", "regeneration", "resistance", "fire_resistance",
                     "water_breathing", "invisibility", "night_vision", "health_boost", "absorption",
                     "saturation", "luck", "slow_falling", "conduit_power", "dolphins_grace",
                     "hero_of_the_village" -> true;
@@ -436,115 +654,142 @@ public final class BotMatchSession {
     }
 
     private void updateNavigation() {
-        setNavigationSpeed(getCombatMovementSpeed());
-        if (!npc.getNavigator().isNavigating()) {
-            updateNavigationTarget();
-        }
-        Location target = player.getEyeLocation().clone();
-        double error = difficulty.getAimError();
-        target.add(random(error), random(error * 0.4), random(error));
-        npc.faceLocation(target);
+        Location target = getAimTarget();
+        faceTarget(target);
         bot.setSprinting(true);
-
-        if (difficulty.isStrafe() && ticks % 12 == 0 && bot.isOnGround()
-                && bot.getLocation().distanceSquared(player.getLocation()) < 25.0) {
-            Vector direction = player.getLocation().toVector().subtract(bot.getLocation().toVector()).setY(0);
-            if (direction.lengthSquared() < 1.0E-6) return;
-            direction.normalize();
-            Vector side = new Vector(-direction.getZ(), 0.0, direction.getX())
-                    .multiply(ThreadLocalRandom.current().nextBoolean() ? 0.11 : -0.11);
-            bot.setVelocity(bot.getVelocity().add(side));
-        }
-    }
-
-    private void updateNavigationTarget() {
-        npc.getNavigator().setStraightLineTarget(player, false);
+        if (difficulty.isStrafe() && ticks % 16 == 0) strafeDirection *= -1.0D;
+        double strafe = difficulty.isStrafe()
+                && bot.getLocation().distanceSquared(player.getLocation()) < 25.0D
+                ? 0.42D * strafeDirection : 0.0D;
+        nativeBot.moveToward(player.getLocation(), getCombatMovementSpeed(), difficulty.getMinReach(), strafe);
     }
 
     private void setNavigationSpeed(double speedModifier) {
-        npc.getNavigator().getDefaultParameters().baseSpeed(1.0F).speedModifier((float) speedModifier);
-        if (npc.getNavigator().isNavigating()) {
-            npc.getNavigator().getLocalParameters().baseSpeed(1.0F).speedModifier((float) speedModifier);
-        }
+        if (nativeBot != null) nativeBot.scaleMovementInput(speedModifier);
     }
 
     private void restoreCombatNavigation() {
-        if (npc == null || !npc.isSpawned()) return;
-        npc.getNavigator().cancelNavigation();
-        setNavigationSpeed(getCombatMovementSpeed());
+        if (nativeBot == null || !nativeBot.isSpawned()) return;
         bot.setSprinting(true);
-        updateNavigationTarget();
     }
 
     private double getCombatMovementSpeed() {
-        return difficulty.getMovementSpeed() * SPRINT_SPEED_MULTIPLIER;
+        return difficulty.getMovementSpeed();
     }
 
     private void tryAttack() {
         if (runningTicks < difficulty.getReactionTicks()) return;
-        if (!isWithinRange(5.0D) || !hasClearLineOfSight()) return;
+        if (!isWithinRange(difficulty.getSwingRange()) || !hasClearLineOfSight()) return;
 
         attackProgress = Math.min(1.0, attackProgress + difficulty.getCps() / 20.0);
         if (attackProgress < 1.0) return;
         attackProgress -= 1.0;
 
-        this.lastCombatSwingTick = Bukkit.getCurrentTick();
-        bot.swingMainHand();
-        if (!isWithinAttackRange()) return;
-        bot.attack(player);
-        dampPostHitCombatVelocity();
-
-        if (difficulty.isWTap()) {
-            bot.setSprinting(false);
-            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-                if (!ended && bot != null) bot.setSprinting(true);
-            }, 1L);
+        if (!isWithinAttackRange()) {
+            bot.swingMainHand();
+            return;
         }
+        if (!isTargetInView()) {
+            bot.swingMainHand();
+            return;
+        }
+        attackAsPlayer();
+    }
+
+    private void attackAsPlayer() {
+        KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        PlayerKnockbackData data = manager.getPlayerData(bot);
+        int attempt = this.debug ? ++this.attackAttemptSequence : 0;
+
+        data.setServerSideHit(true);
+        try {
+            nativeBot.attack(player);
+        } finally {
+            data.setServerSideHit(false);
+        }
+        if (!difficulty.isWTap() && !ended) {
+            // NMS interrupts sprint after a successful sprint hit. Holding Ctrl
+            // re-engages it before the next movement tick when W-tap is disabled.
+            bot.setSprinting(true);
+        }
+        verifyAttackAttempt(attempt, data);
+    }
+
+    public void confirmBotAttack() {
+        if (this.debug) this.acceptedAttackSequence = this.attackAttemptSequence;
+        if (!difficulty.isWTap() || ended || bot == null) return;
+        bot.setSprinting(false);
+        nativeBot.clearMovementInput();
+        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
+            if (!ended && bot != null) bot.setSprinting(true);
+        }, 1L);
+    }
+
+    private void verifyAttackAttempt(int attempt, PlayerKnockbackData data) {
+        if (!this.debug || attempt == 0) return;
+
+        Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+            if (this.ended || this.acceptedAttackSequence >= attempt) return;
+            trace("Attack produced no accepted damage event: matchState=" + matchContext.getState()
+                    + " profile=" + data.getProfileName()
+                    + " distance=" + String.format(java.util.Locale.ROOT, "%.3f",
+                    bot.getLocation().distance(player.getLocation())));
+        });
     }
 
     private boolean isWithinAttackRange() {
-        return isWithinRange(difficulty.getAttackRange());
+        return isWithinRange(getAttackReach());
     }
 
-    public void markIncomingMeleeKnockback() {
-        long currentTick = Bukkit.getCurrentTick();
-        this.pendingMeleeKnockbackTick = currentTick;
-        this.lastIncomingMeleeTick = currentTick;
+    private double getAttackReach() {
+        // Difficulty attack range is the long-standing Bot behaviour. The
+        // profile's interaction-range attribute still applies to packet-driven
+        // players, but must not silently shrink Hard's configured 3.2 range.
+        return difficulty.getAttackRange();
     }
 
-    private void dampPostHitCombatVelocity() {
-        long damageAge = Bukkit.getCurrentTick() - this.lastIncomingMeleeTick;
-        if (damageAge < 0L || damageAge > POST_HIT_INPUT_DAMPING_TICKS) return;
-
-        Vector velocity = bot.getVelocity();
-        velocity.setX(velocity.getX() * ATTACK_INPUT_KB_MULTIPLIER);
-        velocity.setZ(velocity.getZ() * ATTACK_INPUT_KB_MULTIPLIER);
-        bot.setVelocity(velocity);
+    private Location getAimTarget() {
+        Location eye = player.getEyeLocation().clone();
+        BoundingBox box = player.getBoundingBox();
+        double eyeY = clamp(eye.getY(), box.getMinY(), box.getMaxY());
+        double chestY = Math.min(eyeY, box.getMinY() + box.getHeight() * 0.72D);
+        double aimY = chestY >= eyeY
+                ? eyeY
+                : ThreadLocalRandom.current().nextDouble(chestY, eyeY);
+        double error = difficulty.getAimError();
+        eye.add(random(error), 0.0D, random(error));
+        eye.setY(clamp(aimY + random(error * 0.2D), chestY, eyeY));
+        return eye;
     }
 
-    public Vector applyCombatInputKnockbackReduction(Vector velocity) {
-        long currentTick = Bukkit.getCurrentTick();
-        long damageAge = currentTick - this.pendingMeleeKnockbackTick;
-        long swingAge = currentTick - this.lastCombatSwingTick;
-        this.pendingMeleeKnockbackTick = Long.MIN_VALUE;
-        long clickWindowTicks = Math.max(1L,
-                (long) Math.ceil(20.0D / Math.max(1.0D, this.difficulty.getCps())));
-        if (damageAge < 0L || damageAge > 1L
-                || swingAge < 0L || swingAge > clickWindowTicks) return velocity;
+    private void faceTarget(Location target) {
+        Vector direction = target.toVector().subtract(bot.getEyeLocation().toVector());
+        if (direction.lengthSquared() < 1.0E-8D) return;
 
-        Vector reduced = velocity.clone();
-        reduced.setX(reduced.getX() * ATTACK_INPUT_KB_MULTIPLIER);
-        reduced.setZ(reduced.getZ() * ATTACK_INPUT_KB_MULTIPLIER);
-        return reduced;
+        Location rotation = bot.getLocation();
+        rotation.setDirection(direction);
+        nativeBot.face(target, (float) difficulty.getAimSpeed());
     }
 
     private boolean isWithinRange(double reach) {
-        BoundingBox box = player.getBoundingBox();
+        BoundingBox box = getCombatTargetBox();
         Vector eye = bot.getEyeLocation().toVector();
         double x = clamp(eye.getX(), box.getMinX(), box.getMaxX());
         double y = clamp(eye.getY(), box.getMinY(), box.getMaxY());
         double z = clamp(eye.getZ(), box.getMinZ(), box.getMaxZ());
         return eye.distanceSquared(new Vector(x, y, z)) <= reach * reach;
+    }
+
+    private BoundingBox getCombatTargetBox() {
+        BoundingBox box = player.getBoundingBox().clone();
+        KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        KnockbackProfile profile = manager.getProfile(manager.getPlayerData(bot).getProfileName());
+        if (profile == null) return box;
+
+        double width = Math.max(box.getWidthX(), box.getWidthZ());
+        double horizontalExpansion = Math.max(0.0D, (profile.getHitboxLength() - width) * 0.5D);
+        double verticalExpansion = Math.max(0.0D, (profile.getHitboxHeight() - box.getHeight()) * 0.5D);
+        return box.expand(horizontalExpansion, verticalExpansion, horizontalExpansion);
     }
 
     private boolean hasClearLineOfSight() {
@@ -555,6 +800,28 @@ public final class BotMatchSession {
         double distance = direction.length();
         return distance < 1.0E-6D || bot.getWorld().rayTraceBlocks(
                 start, direction.normalize(), distance, FluidCollisionMode.NEVER, true) == null;
+    }
+
+    /**
+     * Player#attack is a server-side convenience call and does not know which
+     * entity the synthetic player's crosshair is over. Require the same
+     * eye-direction entity ray that a real client would use before applying a
+     * melee hit, so targets behind or outside the bot's view cannot be hit.
+     */
+    private boolean isTargetInView() {
+        Location eye = bot.getEyeLocation();
+        Vector direction = eye.getDirection();
+        if (direction.lengthSquared() < 1.0E-8D) return false;
+
+        double reach = getAttackReach();
+        RayTraceResult hit = getCombatTargetBox().rayTrace(
+                eye.toVector(), direction.normalize(), reach);
+        if (hit == null) return false;
+
+        RayTraceResult block = bot.getWorld().rayTraceBlocks(
+                eye, direction.normalize(), hit.getHitPosition().distance(eye.toVector()),
+                FluidCollisionMode.NEVER, true);
+        return block == null;
     }
 
     private double clamp(double value, double minimum, double maximum) {
@@ -570,6 +837,7 @@ public final class BotMatchSession {
             if (this.ticks < this.healingRecoveryTick) return true;
             this.healingRecoveryTick = 0;
             selectCombatItem();
+            restoreCombatNavigation();
         }
         if (difficulty.getHealHealth() <= 0.0 || bot.getHealth() > difficulty.getHealHealth()
                 || ticks < nextHealTick) return false;
@@ -600,7 +868,7 @@ public final class BotMatchSession {
         this.healingThrowTick = this.ticks + (this.turnHealing
                 ? TURN_HEAL_WINDUP_TICKS : DOWNWARD_HEAL_WINDUP_TICKS);
         this.healingActionDeadlineTick = this.ticks + HEAL_ACTION_TIMEOUT_TICKS;
-        this.npc.getNavigator().cancelNavigation();
+        this.nativeBot.clearMovementInput();
         this.bot.updateInventory();
         updateHealingPose();
     }
@@ -629,13 +897,17 @@ public final class BotMatchSession {
             velocity = landing.toVector().subtract(bot.getEyeLocation().toVector())
                     .normalize().multiply(0.85D);
         }
-        npc.faceLocation(bot.getEyeLocation().clone().add(velocity.clone().multiply(5.0D)));
+        nativeBot.face(bot.getEyeLocation().clone().add(velocity.clone().multiply(5.0D)), 180.0F);
 
         KnockbackManager knockbackManager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        if (!knockbackManager.isKnockbackApplied(bot, kit)) {
+            knockbackManager.applyKnockback(bot, kit);
+        }
         PotionMotionListener potionMotionListener = knockbackManager.getPotionMotionListener();
         ThrownPotion potion;
         if (potionMotionListener != null) potionMotionListener.beginCustomLaunch(bot);
         try {
+            bot.swingMainHand();
             potion = bot.launchProjectile(ThrownPotion.class, velocity);
         } catch (RuntimeException exception) {
             cancelHealingAction();
@@ -651,29 +923,27 @@ public final class BotMatchSession {
         bot.updateInventory();
 
         this.nextHealTick = this.ticks + 30;
-        this.healingRecoveryTick = this.ticks + HEAL_RECOVERY_TICKS;
+        this.healingRecoveryTick = this.ticks
+                + (this.turnHealing ? TURN_HEAL_RECOVERY_TICKS : HEAL_RECOVERY_TICKS);
         this.healingPotionSlot = -1;
         this.healingPotion = null;
         this.healingEscapeDirection = null;
-        restoreCombatNavigation();
     }
 
     private void updateHealingPose() {
         Location eye = bot.getEyeLocation();
         if (this.turnHealing) {
-            npc.faceLocation(eye.clone().add(this.healingEscapeDirection.clone().multiply(5.0D)));
-            Vector velocity = bot.getVelocity();
-            velocity.setX(this.healingEscapeDirection.getX() * 0.24D);
-            velocity.setZ(this.healingEscapeDirection.getZ() * 0.24D);
+            nativeBot.face(eye.clone().add(this.healingEscapeDirection.clone().multiply(5.0D)), 180.0F);
             bot.setSprinting(true);
-            bot.setVelocity(velocity);
+            nativeBot.moveToward(bot.getLocation().clone().add(this.healingEscapeDirection),
+                    getCombatMovementSpeed(), 0.0D, 0.0D);
             return;
         }
 
         Location lookAt = bot.getLocation().clone()
                 .add(this.healingEscapeDirection.clone().multiply(0.65D))
                 .add(0.0D, 0.05D, 0.0D);
-        npc.faceLocation(lookAt);
+        nativeBot.face(lookAt, 180.0F);
     }
 
     private void cancelHealingAction() {
@@ -686,23 +956,21 @@ public final class BotMatchSession {
     }
 
     private boolean tryBuildUhcAction() {
-        if (this.goldenAppleSlot >= 0) {
-            tickGoldenAppleUse();
+        if (this.buildingSlot >= 0) {
+            tickBlockPlacement();
             return true;
         }
         if (this.bowSlot >= 0) {
             tickBowCharge();
             return true;
         }
-        if (this.activeRodProjectile != null && this.ticks >= this.removeRodTick) {
-            if (this.activeRodProjectile.isValid()) this.activeRodProjectile.remove();
-            this.activeRodProjectile = null;
-            selectCombatItem();
-        }
-        if (this.activeRodProjectile != null) return true;
+        tickRodProjectile();
+        if (this.holdingRod) return true;
 
         if (tryGoldenApple()) return true;
         double distanceSquared = bot.getLocation().distanceSquared(player.getLocation());
+        if (distanceSquared <= 12.25D && this.ticks >= this.nextBlockTick
+                && ThreadLocalRandom.current().nextInt(20) == 0 && placeBlockingBlocks()) return true;
         if (difficulty.isLava() && distanceSquared <= 9.0
                 && this.ticks >= this.nextLavaTick && placeTemporaryLava()) return true;
         if (difficulty.isBow() && distanceSquared >= 49.0
@@ -711,7 +979,240 @@ public final class BotMatchSession {
                 && this.ticks >= this.nextRodTick && castRod();
     }
 
+    private boolean tryDebuffPotion() {
+        double distanceSquared = bot.getLocation().distanceSquared(player.getLocation());
+        if (distanceSquared > 16.0D || this.ticks < this.nextDebuffTick
+                || ThreadLocalRandom.current().nextInt(12) != 0) return false;
+
+        ItemStack[] contents = bot.getInventory().getStorageContents();
+        for (int slot = 0; slot < contents.length; slot++) {
+            ItemStack item = contents[slot];
+            if (item == null || item.getType() != Material.SPLASH_POTION
+                    || PotionUtil.isSplashHealthPotion(item)) continue;
+            List<PotionEffect> effects = PotionUtil.getPotionEffects(item);
+            if (effects.isEmpty() || effects.stream().noneMatch(this::isDebuff)) continue;
+            if (effects.stream().anyMatch(effect -> {
+                PotionEffect active = player.getPotionEffect(effect.getType());
+                return active != null && active.getDuration() > 100;
+            })) continue;
+
+            int heldSlot = holdItem(slot);
+            ItemStack thrownItem = bot.getInventory().getItem(heldSlot).clone();
+            thrownItem.setAmount(1);
+            Location target = player.getLocation().clone().add(player.getVelocity().clone().multiply(3.0D));
+            Vector velocity = target.toVector().subtract(bot.getEyeLocation().toVector())
+                    .normalize().multiply(0.9D);
+            nativeBot.face(target, 180.0F);
+            bot.swingMainHand();
+            KnockbackManager knockbackManager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+            PotionMotionListener potionMotionListener = knockbackManager.getPotionMotionListener();
+            ThrownPotion potion;
+            if (potionMotionListener != null) potionMotionListener.beginCustomLaunch(bot);
+            try {
+                potion = bot.launchProjectile(ThrownPotion.class, velocity);
+            } finally {
+                if (potionMotionListener != null) potionMotionListener.endCustomLaunch(bot);
+            }
+            potion.setItem(thrownItem);
+            if (potionMotionListener != null) potionMotionListener.applyCustomLaunch(potion, bot);
+            spawnedProjectiles.add(potion);
+            consumeOne(heldSlot);
+            nextDebuffTick = ticks + 60;
+            selectCombatItem();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isDebuff(PotionEffect effect) {
+        return switch (effect.getType().getKey().getKey()) {
+            case "slowness", "poison", "weakness", "blindness", "mining_fatigue", "nausea",
+                    "wither", "levitation", "unluck", "darkness" -> true;
+            default -> false;
+        };
+    }
+
+    private boolean placeBlockingBlocks() {
+        if (!canBuild()) return false;
+        int blockSlot = findPlaceableBlockSlot();
+        if (blockSlot < 0) return false;
+
+        Vector towardBot = bot.getLocation().toVector().subtract(player.getLocation().toVector()).setY(0.0D);
+        if (towardBot.lengthSquared() < 1.0E-6D) return false;
+        BlockFace direction = cardinalFace(towardBot);
+        Block base = player.getLocation().getBlock().getRelative(direction);
+        List<Location> targets = new ArrayList<>(2);
+        for (int height = 0; height < 2; height++) {
+            Block block = base.getRelative(0, height, 0);
+            if (canPlaceBlockAt(block, targets)) targets.add(block.getLocation());
+        }
+        if (targets.isEmpty()) return false;
+
+        this.buildingSlot = holdItem(blockSlot);
+        this.buildTargets = List.copyOf(targets);
+        this.buildTargetIndex = 0;
+        this.nextBuildPlacementTick = this.ticks + BLOCK_AIM_TICKS;
+        this.buildWeaponReturnTick = 0;
+        nextBlockTick = ticks + 50;
+        nativeBot.clearMovementInput();
+        faceBlock(this.buildTargets.getFirst());
+        return true;
+    }
+
+    private void tickBlockPlacement() {
+        nativeBot.clearMovementInput();
+        if (this.buildTargetIndex < this.buildTargets.size()) {
+            Location target = this.buildTargets.get(this.buildTargetIndex);
+            faceBlock(target);
+            if (this.ticks < this.nextBuildPlacementTick) return;
+
+            Block block = target.getBlock();
+            ItemStack heldBlock = bot.getInventory().getItem(this.buildingSlot);
+            if (heldBlock == null || !heldBlock.getType().isBlock()
+                    || !canPlaceBlockAt(block, this.buildTargets.subList(0, this.buildTargetIndex))) {
+                finishBlockPlacement();
+                return;
+            }
+
+            recordPlacedBlock(block.getState());
+            block.setType(heldBlock.getType(), false);
+            bot.swingMainHand();
+            SoundGroup sounds = block.getBlockData().getSoundGroup();
+            bot.getWorld().playSound(block.getLocation().add(0.5D, 0.5D, 0.5D),
+                    sounds.getPlaceSound(), sounds.getVolume(), sounds.getPitch() * 0.8F);
+            consumeOne(this.buildingSlot);
+            syncHeldItem();
+            bot.updateInventory();
+            this.buildTargetIndex++;
+            this.nextBuildPlacementTick = this.ticks + BLOCK_PLACE_INTERVAL_TICKS;
+            if (this.buildTargetIndex >= this.buildTargets.size()) {
+                this.buildWeaponReturnTick = this.ticks + BLOCK_WEAPON_RETURN_TICKS;
+            }
+            return;
+        }
+
+        if (this.ticks >= this.buildWeaponReturnTick) finishBlockPlacement();
+    }
+
+    private boolean canPlaceBlockAt(Block block, List<Location> plannedSupports) {
+        if (!block.getType().isAir()) return false;
+        Location eye = bot.getEyeLocation();
+        Location center = block.getLocation().add(0.5D, 0.5D, 0.5D);
+        Vector sightLine = center.toVector().subtract(eye.toVector());
+        double distance = sightLine.length();
+        if (distance > 4.5D) return false;
+        RayTraceResult obstruction = bot.getWorld().rayTraceBlocks(
+                eye, sightLine.normalize(), distance, FluidCollisionMode.NEVER, true);
+        if (obstruction != null && obstruction.getHitBlock() != null
+                && !obstruction.getHitBlock().equals(block)
+                && !isAdjacentSupport(block, obstruction.getHitBlock(), plannedSupports)) return false;
+
+        BoundingBox blockBox = new BoundingBox(block.getX(), block.getY(), block.getZ(),
+                block.getX() + 1.0D, block.getY() + 1.0D, block.getZ() + 1.0D);
+        if (blockBox.overlaps(player.getBoundingBox()) || blockBox.overlaps(bot.getBoundingBox())) return false;
+
+        for (BlockFace face : new BlockFace[]{BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH,
+                BlockFace.EAST, BlockFace.WEST, BlockFace.UP}) {
+            Block support = block.getRelative(face);
+            if (support.getType().isSolid() || plannedSupports.stream().anyMatch(location ->
+                    location.getBlockX() == support.getX() && location.getBlockY() == support.getY()
+                            && location.getBlockZ() == support.getZ())) return true;
+        }
+        return false;
+    }
+
+    private boolean isAdjacentSupport(Block target, Block support, List<Location> plannedSupports) {
+        for (BlockFace face : new BlockFace[]{BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH,
+                BlockFace.EAST, BlockFace.WEST, BlockFace.UP}) {
+            Block adjacent = target.getRelative(face);
+            if (!adjacent.equals(support)) continue;
+            return support.getType().isSolid() || plannedSupports.stream().anyMatch(location ->
+                    location.getBlockX() == support.getX() && location.getBlockY() == support.getY()
+                            && location.getBlockZ() == support.getZ());
+        }
+        return false;
+    }
+
+    private BlockFace cardinalFace(Vector direction) {
+        if (Math.abs(direction.getX()) > Math.abs(direction.getZ())) {
+            return direction.getX() >= 0.0D ? BlockFace.EAST : BlockFace.WEST;
+        }
+        return direction.getZ() >= 0.0D ? BlockFace.SOUTH : BlockFace.NORTH;
+    }
+
+    private void faceBlock(Location blockLocation) {
+        nativeBot.face(blockLocation.clone().add(0.5D, 0.5D, 0.5D), 180.0F);
+    }
+
+    private void finishBlockPlacement() {
+        this.buildingSlot = -1;
+        this.buildTargets = List.of();
+        this.buildTargetIndex = 0;
+        this.nextBuildPlacementTick = 0;
+        this.buildWeaponReturnTick = 0;
+        selectCombatItem();
+        restoreCombatNavigation();
+    }
+
+    private int findPlaceableBlockSlot() {
+        ItemStack[] contents = bot.getInventory().getStorageContents();
+        for (int slot = 0; slot < contents.length; slot++) {
+            ItemStack item = contents[slot];
+            if (item == null || !item.getType().isBlock() || item.getType().hasGravity()) continue;
+            if (item.getType() == Material.BEDROCK || item.getType() == Material.BARRIER) continue;
+            return slot;
+        }
+        return -1;
+    }
+
+    private boolean needsPriorityHealing() {
+        return difficulty.getHealHealth() > 0.0D && bot.getHealth() <= difficulty.getHealHealth();
+    }
+
+    private void interruptForPriorityHealing() {
+        boolean restoreWeapon = this.buildingSlot >= 0 || this.holdingRod;
+        if (this.buffPotionSlot >= 0) finishBuffPotionUse(false);
+        if (this.bowSlot >= 0) finishBowCharge(false);
+        if (this.buildingSlot >= 0) clearBlockPlacement();
+        if (this.activeRodProjectile != null) {
+            if (this.activeRodProjectile.isValid()) this.activeRodProjectile.remove();
+            this.activeRodProjectile = null;
+        }
+        this.holdingRod = false;
+        this.rodWeaponReturnTick = 0;
+        if (restoreWeapon) selectCombatItem();
+    }
+
+    private void clearBlockPlacement() {
+        this.buildingSlot = -1;
+        this.buildTargets = List.of();
+        this.buildTargetIndex = 0;
+        this.nextBuildPlacementTick = 0;
+        this.buildWeaponReturnTick = 0;
+    }
+
+    private boolean tryExtinguishFire() {
+        if (!difficulty.isAntiFire() || !canBuild() || bot.getFireTicks() <= 0) return false;
+        int waterSlot = findSlot(Material.WATER_BUCKET);
+        Block feet = bot.getLocation().getBlock();
+        if (waterSlot < 0 || !feet.getType().isAir()
+                || !feet.getRelative(BlockFace.DOWN).getType().isSolid()) return false;
+
+        BlockState original = feet.getState();
+        recordPlacedBlock(original);
+        holdItem(waterSlot);
+        bot.swingMainHand();
+        feet.setType(Material.WATER, false);
+        bot.setFireTicks(0);
+        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
+            if (feet.getType() == Material.WATER) original.update(true, false);
+            if (!ended) selectCombatItem();
+        }, 4L);
+        return true;
+    }
+
     private boolean placeTemporaryLava() {
+        if (!canBuild()) return false;
         int lavaSlot = findSlot(Material.LAVA_BUCKET);
         Block target = player.getLocation().getBlock();
         if (lavaSlot < 0 || !target.getType().isAir()
@@ -720,6 +1221,7 @@ public final class BotMatchSession {
         BlockState original = target.getState();
         recordPlacedBlock(original);
         holdItem(lavaSlot);
+        bot.swingMainHand();
         target.setType(Material.LAVA, false);
         this.nextLavaTick = this.ticks + 120;
         this.nextBowTick = this.ticks + 15;
@@ -727,7 +1229,7 @@ public final class BotMatchSession {
         Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
             if (!this.ended && target.getType() == Material.LAVA) original.update(true, false);
             if (!this.ended) selectCombatItem();
-        }, 12L);
+        }, difficulty.getLavaTicks());
         return true;
     }
 
@@ -786,7 +1288,6 @@ public final class BotMatchSession {
         this.activeItemUseDuration = bot.hasActiveItem()
                 ? Math.max(0, bot.getActiveItemRemainingTime()) : 0;
         keepUsingHeldItem(remainingTicks);
-        if (this.npc != null) this.npc.data().set(NPC.Metadata.USING_HELD_ITEM, true);
     }
 
     private void keepUsingHeldItem(int remainingTicks) {
@@ -797,7 +1298,6 @@ public final class BotMatchSession {
     private void stopUsingHeldItem() {
         if (bot.hasActiveItem()) bot.clearActiveItem();
         this.activeItemUseDuration = 0;
-        if (this.npc != null) this.npc.data().set(NPC.Metadata.USING_HELD_ITEM, false);
     }
 
     private boolean beginBowCharge() {
@@ -824,7 +1324,9 @@ public final class BotMatchSession {
 
         bot.setSprinting(false);
         setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
-        npc.faceLocation(player.getEyeLocation());
+        Location origin = bot.getEyeLocation();
+        nativeBot.face(origin.clone().add(solveArrowVelocity(origin, getBowArrowSpeed())),
+                (float) difficulty.getAimSpeed());
         if (this.ticks < this.bowReleaseTick) return;
         finishBowCharge(true);
     }
@@ -841,19 +1343,18 @@ public final class BotMatchSession {
             clearBowCharge();
             return;
         }
+        double arrowSpeed = getBowArrowSpeed();
         Location origin = bot.getEyeLocation();
-        Location target = player.getEyeLocation().clone();
-        double distance = origin.distance(target);
-        target.add(0.0, Math.min(2.0, distance * 0.035), 0.0);
-        Vector velocity = target.toVector().subtract(origin.toVector()).normalize().multiply(3.0);
+        Vector velocity = solveArrowVelocity(origin, arrowSpeed);
+        nativeBot.face(origin.clone().add(velocity), 180.0F);
         Arrow arrow = bot.launchProjectile(Arrow.class, velocity);
         this.spawnedProjectiles.add(arrow);
         int punch = this.chargingBow == null ? 0 : this.chargingBow.getEnchantmentLevel(Enchantment.PUNCH);
-        int power = this.chargingBow == null ? 0 : this.chargingBow.getEnchantmentLevel(Enchantment.POWER);
-        arrow.setCritical(true);
-        arrow.setDamage(2.0 + power * 0.5);
+        int powerLevel = this.chargingBow == null ? 0 : this.chargingBow.getEnchantmentLevel(Enchantment.POWER);
+        arrow.setCritical(BOW_CHARGE_TICKS >= 20);
+        arrow.setDamage(2.0 + powerLevel * 0.5);
         if (kit.isSettingEnabled(KitSettingOldSwordBlocking.class)) {
-            LegacyProjectileData.markArrow(arrow, punch, power, 1.0F);
+            LegacyProjectileData.markArrow(arrow, punch, powerLevel);
         } else {
             LegacyProjectileData.storeBowPunch(arrow, punch);
         }
@@ -874,11 +1375,19 @@ public final class BotMatchSession {
         restoreCombatNavigation();
     }
 
+    private double getBowArrowSpeed() {
+        double charge = Math.min(1.0D, BOW_CHARGE_TICKS / 20.0D);
+        double power = (charge * charge + charge * 2.0D) / 3.0D;
+        return Math.min(1.0D, power) * 3.0D;
+    }
+
     private boolean castRod() {
         int rodSlot = findSlot(Material.FISHING_ROD);
         if (rodSlot < 0 || this.activeRodProjectile != null) return false;
 
         holdItem(rodSlot);
+        nativeBot.face(player.getEyeLocation(), 180.0F);
+        bot.swingMainHand();
         Vector velocity = player.getEyeLocation().toVector().subtract(bot.getEyeLocation().toVector())
                 .normalize().multiply(1.5);
         try {
@@ -887,10 +1396,72 @@ public final class BotMatchSession {
             this.activeRodProjectile = bot.launchProjectile(Snowball.class, velocity);
         }
         this.spawnedProjectiles.add(this.activeRodProjectile);
-        this.removeRodTick = this.ticks + 20;
+        bot.getWorld().playSound(bot.getLocation(), Sound.ENTITY_FISHING_BOBBER_THROW, 1.0F, 1.0F);
+        this.holdingRod = true;
+        this.rodWeaponReturnTick = this.ticks + ROD_WEAPON_RETURN_TICKS;
+        this.removeRodTick = this.ticks + ROD_MAX_LIFETIME_TICKS;
         this.nextRodTick = this.ticks + 32;
         this.nextBowTick = this.ticks + 12;
         return true;
+    }
+
+    private void tickRodProjectile() {
+        if (this.activeRodProjectile == null) return;
+
+        boolean hit = !this.activeRodProjectile.isValid()
+                || this.activeRodProjectile instanceof FishHook hook && hook.getHookedEntity() != null;
+        if (hit) {
+            finishRodHold(true);
+            if (this.activeRodProjectile != null) {
+                if (this.activeRodProjectile.isValid()) this.activeRodProjectile.remove();
+                this.activeRodProjectile = null;
+            }
+            return;
+        }
+        if (this.ticks >= this.rodWeaponReturnTick) finishRodHold(false);
+        if (this.activeRodProjectile != null && this.ticks >= this.removeRodTick) {
+            if (this.activeRodProjectile.isValid()) this.activeRodProjectile.remove();
+            this.activeRodProjectile = null;
+        }
+    }
+
+    private void finishRodHold(boolean retract) {
+        if (retract && this.activeRodProjectile != null) {
+            if (this.activeRodProjectile.isValid()) this.activeRodProjectile.remove();
+            this.activeRodProjectile = null;
+        }
+        if (!this.holdingRod) return;
+        this.holdingRod = false;
+        this.rodWeaponReturnTick = 0;
+        selectCombatItem();
+        restoreCombatNavigation();
+    }
+
+    private Vector solveArrowVelocity(Location origin, double speed) {
+        Vector targetOrigin = player.getEyeLocation().toVector();
+        Vector targetMotion = player.getVelocity().clone();
+        Vector best = targetOrigin.clone().subtract(origin.toVector()).normalize().multiply(speed);
+        double bestError = Double.MAX_VALUE;
+
+        for (int flightTicks = 1; flightTicks <= 60; flightTicks++) {
+            double dragPower = Math.pow(ARROW_DRAG, flightTicks);
+            double dragSum = (1.0D - dragPower) / (1.0D - ARROW_DRAG);
+            double leadTicks = Math.min(flightTicks, 12) * 0.8D;
+            Vector target = targetOrigin.clone().add(targetMotion.clone().multiply(leadTicks));
+            Vector displacement = target.subtract(origin.toVector());
+            double gravityDrop = ARROW_GRAVITY / (1.0D - ARROW_DRAG) * (flightTicks - dragSum);
+            Vector required = new Vector(displacement.getX() / dragSum,
+                    (displacement.getY() + gravityDrop) / dragSum,
+                    displacement.getZ() / dragSum);
+            double requiredSpeed = required.length();
+            double error = Math.abs(requiredSpeed - speed);
+            if (required.getY() > speed * 0.85D) error += required.getY();
+            if (error < bestError && requiredSpeed > 1.0E-6D) {
+                bestError = error;
+                best = required.multiply(speed / requiredSpeed);
+            }
+        }
+        return best;
     }
 
     private int findSlot(Material material) {
@@ -938,12 +1509,6 @@ public final class BotMatchSession {
         equipment.setHelmet(helmet);
         equipment.setItemInOffHand(bot.getInventory().getItemInOffHand());
 
-        Equipment trait = npc.getOrAddTrait(Equipment.class);
-        trait.set(Equipment.EquipmentSlot.BOOTS, boots);
-        trait.set(Equipment.EquipmentSlot.LEGGINGS, leggings);
-        trait.set(Equipment.EquipmentSlot.CHESTPLATE, chestplate);
-        trait.set(Equipment.EquipmentSlot.HELMET, helmet);
-        trait.set(Equipment.EquipmentSlot.OFF_HAND, bot.getInventory().getItemInOffHand());
         syncHeldItem();
         bot.updateInventory();
     }
@@ -953,9 +1518,6 @@ public final class BotMatchSession {
         EntityEquipment equipment = bot.getEquipment();
         if (equipment != null) {
             equipment.setItemInMainHand(heldItem);
-        }
-        if (npc != null) {
-            npc.getOrAddTrait(Equipment.class).set(Equipment.EquipmentSlot.HAND, heldItem);
         }
     }
 
@@ -1009,7 +1571,7 @@ public final class BotMatchSession {
         this.forcingBotDeath = true;
         this.running = false;
         if (this.task != null) this.task.cancel();
-        if (this.npc != null) this.npc.getNavigator().cancelNavigation();
+        if (this.nativeBot != null) this.nativeBot.stopMoving();
         this.bot.playHurtAnimation(0.0F);
         this.bot.setHealth(0.0D);
         Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
@@ -1030,10 +1592,7 @@ public final class BotMatchSession {
         running = false;
         if (task != null) task.cancel();
         if (bot != null) stopUsingHeldItem();
-        if (npc != null) {
-            npc.getNavigator().cancelNavigation();
-            if (!naturalDeath || !playerWon) npc.setProtected(true);
-        }
+        if (nativeBot != null) nativeBot.stopMoving();
         if (!naturalDeath || !playerWon) freezeBotForResults();
 
         if (playerWon && !naturalDeath && bot != null) {
@@ -1042,21 +1601,20 @@ public final class BotMatchSession {
         concludeMatchContext(playerWon);
         if (playerWon && !naturalDeath && bot != null) {
             Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-                if (this.npc != null && this.npc.isSpawned() && this.bot != null) {
+                if (this.nativeBot != null && this.nativeBot.isSpawned() && this.bot != null) {
                     this.bot.playEffect(EntityEffect.DEATH);
                 }
             }, DEATH_EFFECT_DELAY_TICKS);
-            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc,
-                    DEATH_EFFECT_DELAY_TICKS + DEATH_ANIMATION_TICKS);
+            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
         } else if (playerWon) {
-            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc,
-                    DEATH_ANIMATION_TICKS);
+            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
+        } else {
+            Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), this::removeBotNpc, BOT_REMOVE_DELAY_TICKS);
         }
 
         returnTask = Bukkit.getScheduler().runTaskLater(
                 AlleyPlugin.getInstance(), this::returnToLobby,
-                playerWon ? Math.max(returnDelayTicks, DEATH_EFFECT_DELAY_TICKS + DEATH_ANIMATION_TICKS)
-                        : returnDelayTicks);
+                Math.max(returnDelayTicks, BOT_REMOVE_DELAY_TICKS));
     }
 
     private void freezeBotForResults() {
@@ -1092,7 +1650,10 @@ public final class BotMatchSession {
         this.matchContext.handleRoundEnd();
 
         int snapshotCount = this.matchContext.getSnapshots().size();
-        this.matchContext.createSnapshot(this.bot);
+        // Only use the fallback if the native player was not visible during setup.
+        if (!this.matchContext.isPlayerInitialized(this.bot.getUniqueId())) {
+            this.matchContext.createSnapshot(this.bot);
+        }
         SnapshotService snapshots = AlleyPlugin.getInstance().getService(SnapshotService.class);
         for (int index = snapshotCount; index < this.matchContext.getSnapshots().size(); index++) {
             snapshots.addSnapshot(this.matchContext.getSnapshots().get(index));
@@ -1117,13 +1678,25 @@ public final class BotMatchSession {
     public void abortStart() {
         if (task != null) task.cancel();
         ended = true;
-        discardMatchContext();
-        clearCombatSystems();
-        cleanupBot();
-        restoreBlocks();
-        restorePlayerToLobby();
-        deleteTemporaryArena();
-        service.complete(this);
+        try {
+            runAbortCleanup("match context", this::discardMatchContext);
+            runAbortCleanup("combat state", this::clearCombatSystems);
+            runAbortCleanup("bot player", this::cleanupBot);
+            runAbortCleanup("changed blocks", this::restoreBlocks);
+            runAbortCleanup("player lobby state", this::restorePlayerToLobby);
+            runAbortCleanup("temporary arena", this::deleteTemporaryArena);
+        } finally {
+            service.complete(this);
+        }
+    }
+
+    private void runAbortCleanup(String step, Runnable cleanup) {
+        try {
+            cleanup.run();
+        } catch (RuntimeException exception) {
+            AlleyPlugin.getInstance().getLogger().log(java.util.logging.Level.WARNING,
+                    "Could not clean up bot match " + step + " for " + player.getName(), exception);
+        }
     }
 
     public void shutdown() {
@@ -1153,15 +1726,27 @@ public final class BotMatchSession {
         Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
         if (profile == null) return;
 
-        profile.setState(ProfileState.LOBBY);
+        // A player who clicked Play Again before returning was already released and queued;
+        // keep their queue state and the queue hotbar instead of forcing the lobby state.
+        // 在返回大厅前点击"再来一局"的玩家已被释放并入队：保持其排队状态和排队hotbar。
+        boolean queued = profile.getQueueProfile() != null;
+
+        if (!queued) {
+            profile.setState(ProfileState.LOBBY);
+        }
         profile.setMatch(null);
         PlayerUtil.reset(player, true, true);
         player.setWalkSpeed(originalWalkSpeed <= 0.0F ? 0.2F : originalWalkSpeed);
         Party party = AlleyPlugin.getInstance().getService(PartyService.class).getParty(player);
         profile.setParty(party);
         AlleyPlugin.getInstance().getService(SpawnService.class).teleportToSpawn(player);
+        MatchListener.clearDeadPlayerPickupBlock(player);
         AlleyPlugin.getInstance().getService(HotbarService.class)
-                .applyHotbarItems(player, party == null ? HotbarType.LOBBY : HotbarType.PARTY);
+                .applyHotbarItems(player, queued ? HotbarType.QUEUE
+                        : (party == null ? HotbarType.LOBBY : HotbarType.PARTY));
+        // No Play Again paper after a bot match — the player returns to the lobby
+        // without a requeue shortcut.
+        // Bot对局结束后不发放"再来一局"纸——玩家直接返回大厅。
         AlleyPlugin.getInstance().getService(VisibilityService.class).updateVisibility(player);
         AlleyPlugin.getInstance().getService(MusicService.class).startMusic(player);
     }
@@ -1177,6 +1762,9 @@ public final class BotMatchSession {
         this.spawnedProjectiles.clear();
         UUID botId = bot == null ? null : bot.getUniqueId();
         if (bot != null) AlleyPlugin.getInstance().getService(CombatService.class).removeLastAttacker(bot, true);
+        if (botId != null) {
+            AlleyPlugin.getInstance().getService(KnockbackManager.class).removePlayer(botId);
+        }
         removeBotNpc();
         if (botId != null) {
             AlleyPlugin.getInstance().getService(ProfileService.class).getProfiles().remove(botId);
@@ -1184,10 +1772,9 @@ public final class BotMatchSession {
     }
 
     private void removeBotNpc() {
-        if (this.npc == null) return;
-        if (this.npc.isSpawned()) this.npc.despawn();
-        this.npc.destroy();
-        this.npc = null;
+        if (this.nativeBot == null) return;
+        this.nativeBot.remove();
+        this.nativeBot = null;
     }
 
     private void clearCombatSystems() {
@@ -1243,6 +1830,17 @@ public final class BotMatchSession {
 
     private double random(double amount) {
         return amount <= 0.0 ? 0.0 : ThreadLocalRandom.current().nextDouble(-amount, amount);
+    }
+
+    private void trace(String message) {
+        if (!this.debug) return;
+        AlleyPlugin.getInstance().getLogger().info(
+                "[BotDebug:" + player.getName() + "] " + message);
+    }
+
+    private String formatVector(Vector vector) {
+        return String.format(java.util.Locale.ROOT, "(%.4f, %.4f, %.4f)",
+                vector.getX(), vector.getY(), vector.getZ());
     }
 
     public UUID getPlayerId() {

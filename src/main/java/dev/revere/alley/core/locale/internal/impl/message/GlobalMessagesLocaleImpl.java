@@ -318,7 +318,7 @@ public enum GlobalMessagesLocaleImpl implements LocaleEntry {
     QUEUE_PROGRESSING_UNRANKED("messages/global-messages.yml", "queue.joined.progressing.unranked.format", Arrays.asList(
             "",
             "&6&l{kit}",
-            " &6&l│ &fPing Range: &6N/A",
+            " &6&l│ &fPing Range: &6{ping-range}",
             "  &7&oSearching for match...",
             ""
     )),
@@ -328,7 +328,7 @@ public enum GlobalMessagesLocaleImpl implements LocaleEntry {
             "",
             "&6&l{kit} &6&l" + Symbol.RANKED_STAR + "Ranked",
             " &6&l│ &fELO Range: &6{min-elo} &7&l" + Symbol.ARROW_R + " &6{max-elo}",
-            " &6&l│ &fPing Range: &6N/A",
+            " &6&l│ &fPing Range: &6{ping-range}",
             "  &7&oSearching for match...",
             ""
     )),
@@ -337,7 +337,7 @@ public enum GlobalMessagesLocaleImpl implements LocaleEntry {
     QUEUE_PROGRESSING_RANKED_LIMIT_REACHED("messages/global-messages.yml", "queue.joined.progressing.ranked.limit-reached.format", Arrays.asList(
             "",
             "&6&l{kit} &6&l" + Symbol.RANKED_STAR + "Ranked",
-            " &6&l│ &fPing Range: &6N/A",
+            " &6&l│ &fPing Range: &6{ping-range}",
             "  &c&lRANGE LIMIT REACHED...",
             ""
     )),

@@ -1,7 +1,7 @@
 package dev.revere.alley.feature.level.command;
 
-import dev.revere.alley.common.constants.PluginConstant;
 import dev.revere.alley.common.text.CC;
+import dev.revere.alley.feature.level.LevelService;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
@@ -20,18 +20,27 @@ public class LevelAdminCommand extends BaseCommand {
     @CompleterData(name = "leveladmin")
     public List<String> kitCompleter(CommandArgs command) {
         List<String> completion = new ArrayList<>();
-        if (command.getArgs().length != 1) {
+        String[] args = command.getArgs();
+
+        if (!command.getSender().hasPermission(this.getAdminPermission())) {
             return completion;
         }
 
-        if (!command.getPlayer().hasPermission(this.plugin.getService(PluginConstant.class).getAdminPermissionPrefix())) {
+        if (args.length == 1) {
+            completion.addAll(Arrays.asList(
+                    "create", "delete", "view", "setminelo",
+                    "setmaxelo", "setdisplayname", "seticon", "list"
+            ));
             return completion;
         }
 
-        completion.addAll(Arrays.asList(
-                "create", "delete", "view", "setminelo",
-                "setmaxelo", "setdisplayname", "seticon", "list"
-        ));
+        if (args.length == 2) {
+            String subCommand = args[0].toLowerCase();
+            if (subCommand.equals("delete") || subCommand.equals("view") || subCommand.equals("setminelo")
+                    || subCommand.equals("setmaxelo") || subCommand.equals("setdisplayname") || subCommand.equals("seticon")) {
+                this.plugin.getService(LevelService.class).getLevels().forEach(level -> completion.add(level.getName()));
+            }
+        }
 
         return completion;
     }

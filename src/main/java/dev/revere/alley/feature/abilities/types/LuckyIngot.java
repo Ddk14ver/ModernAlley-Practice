@@ -20,11 +20,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * @author Hysteria Development
- * 作者 Hysteria Development
  * @project Practice
- * 项目 Practice
  * @date 2/15/2023
- * 日期 2/15/2023
  */
 public class LuckyIngot extends Ability {
     private final AlleyPlugin plugin = AlleyPlugin.getInstance();

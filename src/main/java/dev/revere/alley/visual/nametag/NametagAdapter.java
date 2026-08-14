@@ -6,6 +6,7 @@ import dev.revere.alley.common.reflect.internal.types.DefaultReflectionImpl;
 import dev.revere.alley.visual.nametag.internal.NametagServiceImpl;
 import lombok.Getter;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
@@ -72,6 +73,13 @@ public class NametagAdapter {
         team.setPrefix(this.prefix);
         team.setSuffix(this.suffix);
 
+        // Also color the team itself so the player's tablist entry matches the in-world
+        // nametag color (a plain prefix alone does not recolor the tablist entry).
+        ChatColor teamColor = parseTeamColor(this.prefix);
+        if (teamColor != null) {
+            team.setColor(teamColor);
+        }
+
         // Set nametag visibility
         // 设置名字标签可见性
         switch (this.visibility) {
@@ -131,5 +139,25 @@ public class NametagAdapter {
         if (team != null && team.hasEntry(player.getName())) {
             team.removeEntry(player.getName());
         }
+    }
+
+    /**
+     * Extracts the first color code (e.g. {@code &c} or {@code §9}) from a nametag prefix,
+     * returning it as a ChatColor so the scoreboard team can be colored the same way.
+     * 从名字标签前缀中解析第一个颜色代码，用于给计分板队伍着色。
+     */
+    private ChatColor parseTeamColor(String prefix) {
+        if (prefix == null || prefix.isEmpty()) return null;
+
+        for (int i = 0; i < prefix.length() - 1; i++) {
+            char c = prefix.charAt(i);
+            if (c == '&' || c == '§') {
+                ChatColor color = ChatColor.getByChar(prefix.charAt(i + 1));
+                if (color != null && color.isColor()) {
+                    return color;
+                }
+            }
+        }
+        return null;
     }
 }

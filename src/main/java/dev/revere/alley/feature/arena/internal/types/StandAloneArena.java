@@ -24,6 +24,9 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.UUID;
 
 /**
@@ -40,12 +43,22 @@ public class StandAloneArena extends Arena {
     private String originalArenaName;
     private int copyId = -1;
 
+    /** Base X/Z slot used by this copy so it can be reused after cleanup. */
+    private Location copyOrigin;
+
+    /** Completion gates for the spawn-first asynchronous preparation pipeline. */
+    private volatile CompletableFuture<Void> spawnReadyFuture = CompletableFuture.completedFuture(null);
+    private volatile CompletableFuture<Void> fullPasteFuture = CompletableFuture.completedFuture(null);
+
     private Location team1Portal;
     private Location team2Portal;
 
     private int portalRadius;
     private int heightLimit;
     private int voidLevel;
+
+    private boolean skyWarsArena;
+    private List<Location> skyWarsSpawns = new ArrayList<>();
 
     /**
      * Constructor for the StandAloneArena class.
@@ -119,6 +132,11 @@ public class StandAloneArena extends Arena {
 
         config.set(name + ".height-limit", this.heightLimit);
         config.set(name + ".void-level", this.voidLevel);
+        config.set(name + ".skywars.enabled", this.skyWarsArena);
+        config.set(name + ".skywars.spawns", this.skyWarsSpawns.stream()
+                .filter(location -> location != null && location.getWorld() != null)
+                .map(Serializer::serializeLocation)
+                .toList());
 
         configService.saveConfig(configService.getConfigFile("storage/arenas.yml"), config);
 
@@ -141,6 +159,34 @@ public class StandAloneArena extends Arena {
         }
 
         this.plugin.getService(ArenaSchematicService.class).delete(this);
+    }
+
+    public CompletableFuture<Void> deleteCopiedArenaAsync() {
+        if (!this.isTemporaryCopy) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        CompletableFuture<Void> pasteCompletion = this.fullPasteFuture == null
+                ? CompletableFuture.completedFuture(null)
+                : this.fullPasteFuture.handle((ignored, throwable) -> null);
+        return pasteCompletion.thenCompose(ignored ->
+                this.plugin.getService(ArenaSchematicService.class).deleteAsync(this));
+    }
+
+    public CompletableFuture<Void> getSpawnReadyFuture() {
+        return this.spawnReadyFuture;
+    }
+
+    public CompletableFuture<Void> getFullPasteFuture() {
+        return this.fullPasteFuture;
+    }
+
+    public void setPreparationFutures(CompletableFuture<Void> spawnReadyFuture,
+                                      CompletableFuture<Void> fullPasteFuture) {
+        this.spawnReadyFuture = spawnReadyFuture == null
+                ? CompletableFuture.completedFuture(null) : spawnReadyFuture;
+        this.fullPasteFuture = fullPasteFuture == null
+                ? CompletableFuture.completedFuture(null) : fullPasteFuture;
     }
 
     public void verifyArenaExists() {
@@ -235,10 +281,23 @@ public class StandAloneArena extends Arena {
                 this.getName(), copyId, newMin, newMax,
                 newTeam1Portal, newTeam2Portal, this.heightLimit, this.voidLevel
         );
+        copiedArena.setCopyOrigin(new Location(targetWorld, targetLocation.getBlockX(), 100, targetLocation.getBlockZ()));
 
         copiedArena.setEnabled(true);
         copiedArena.setDisplayName(this.getDisplayName());
         copiedArena.setKits(this.getKits());
+        copiedArena.setSkyWarsArena(this.skyWarsArena);
+
+        for (Location spawn : this.skyWarsSpawns) {
+            if (spawn == null) continue;
+            int offsetX = spawn.getBlockX() - actualMinX;
+            int offsetY = spawn.getBlockY() - actualMinY;
+            int offsetZ = spawn.getBlockZ() - actualMinZ;
+            Location copiedSpawn = targetLocation.clone().add(offsetX + 0.5, offsetY, offsetZ + 0.5);
+            copiedSpawn.setYaw(spawn.getYaw());
+            copiedSpawn.setPitch(spawn.getPitch());
+            copiedArena.getSkyWarsSpawns().add(copiedSpawn);
+        }
 
         double middleOffset = 0.5;
 

@@ -8,11 +8,8 @@ import org.bukkit.command.CommandSender;
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 5/26/2024
- * 日期 2024年5月26日
  */
 public class MatchCommand extends BaseCommand {
     @CommandData(
@@ -33,6 +30,7 @@ public class MatchCommand extends BaseCommand {
         sender.sendMessage(CC.translate(" &6│ &6/match info &8(&7player&8) &7| Get match info of a player"));
         sender.sendMessage(CC.translate(" &6│ &6/match pull &8(&7player&8) &8(&7target&8) &8[&7newTeam&8] &7| Pull a lobby player into the target's match"));
         sender.sendMessage(CC.translate(" &6│ &6/match revive &8(&7player&8) &8(&7silent&8) &7| Revive a spectating player in their match"));
+        sender.sendMessage(CC.translate(" &6│ &6/match resetblocks &7| Reset block changes in the world"));
         sender.sendMessage("");
     }
 }

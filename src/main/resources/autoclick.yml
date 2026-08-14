@@ -1,0 +1,16 @@
+# Server-side autoclick test feature. It is disabled for every player until
+# they explicitly run /autoclick (or /ac).
+attacks-per-second: 10.0
+max-attack-range: 3.0
+ray-size: 0.01
+
+# A client-only END_GATEWAY probe lets vanilla clients emit BLOCK_DIG
+# start/abort packets. Its client collision shape is empty, its outline shape
+# is a full cube, and the bundled mandatory resource pack makes its renderer
+# transparent. It can therefore stay present continuously without slowing the
+# player or relying on a lossy pulse heartbeat.
+probe:
+  material: END_GATEWAY
+  min-distance: 1.15
+  max-distance: 1.85
+  transition-timeout-ticks: 10

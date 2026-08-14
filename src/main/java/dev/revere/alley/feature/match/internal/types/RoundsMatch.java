@@ -12,6 +12,7 @@ import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingBridges;
 import dev.revere.alley.feature.kit.setting.types.mode.KitSettingStickFight;
 import dev.revere.alley.feature.match.MatchState;
+import dev.revere.alley.feature.match.listener.MatchListener;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.TeamGameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
@@ -73,6 +74,8 @@ public class RoundsMatch extends DefaultMatch {
 
     @Override
     public void handleRoundEnd() {
+        if (this.deferToPrimaryThread(this::handleRoundEnd)) return;
+
         this.winner = this.getParticipantA().isAllDead() ? this.getParticipantB() : this.getParticipantA();
         this.winner.getLeader().getData().incrementScore();
         this.loser = this.getParticipantA().isAllDead() ? this.getParticipantA() : this.getParticipantB();
@@ -95,6 +98,7 @@ public class RoundsMatch extends DefaultMatch {
 
                 this.getParticipants().forEach(participant -> participant.getPlayers().forEach(playerParticipant -> {
                     Player player1 = playerParticipant.getTeamPlayer();
+                    if (player1 == null) return;
                     player1.setVelocity(new Vector(0, 0, 0));
                     playerParticipant.setDead(false);
 
@@ -126,31 +130,31 @@ public class RoundsMatch extends DefaultMatch {
 
     @Override
     public void handleDeath(Player player, EntityDamageEvent.DamageCause cause) {
+        if (this.deferToPrimaryThread(() -> this.handleDeath(player, cause))) return;
+
+        if (!(this.getState() == MatchState.STARTING || this.getState() == MatchState.RUNNING)) {
+            return;
+        }
+
         GameParticipant<MatchGamePlayer> participant = this.getParticipantA().containsPlayer(player.getUniqueId())
                 ? this.getParticipantA()
                 : this.getParticipantB();
-        participant.getLeader().getData().incrementDeaths();
+        MatchGamePlayer victim = this.getFromAllGamePlayers(player);
+        if (victim == null || victim.isDead()) {
+            return;
+        }
+        MatchListener.blockDeadPlayerPickup(player);
+        victim.getData().incrementDeaths();
 
         this.fallenPlayer = player;
 
+        Player lastAttacker = AlleyPlugin.getInstance().getService(CombatService.class).getLastAttacker(player);
+        GameParticipant<MatchGamePlayer> opponent = participant == this.getParticipantA()
+                ? this.getParticipantB()
+                : this.getParticipantA();
+        this.setScorer(lastAttacker == null ? opponent.getLeader().getUsername() : lastAttacker.getName());
+
         if (this.getKit().isSettingEnabled(KitSettingStickFight.class)) {
-            Player lastAttacker = AlleyPlugin.getInstance().getService(CombatService.class).getLastAttacker(player);
-            if (lastAttacker == null) {
-                GameParticipant<MatchGamePlayer> opponent = this.getParticipantA().containsPlayer(player.getUniqueId())
-                        ? this.getParticipantB()
-                        : this.getParticipantA();
-
-                this.setScorer(opponent.getLeader().getUsername());
-            } else {
-                this.setScorer(lastAttacker.getName());
-            }
-
-            if (this.getParticipantA().containsPlayer(player.getUniqueId())) {
-                participant = this.getParticipantA();
-            } else {
-                participant = this.getParticipantB();
-            }
-
             if (participant instanceof TeamGameParticipant<?>) {
                 TeamGameParticipant<MatchGamePlayer> team = (TeamGameParticipant<MatchGamePlayer>) participant;
                 MatchGamePlayer gamePlayer = team.getPlayers().stream()
@@ -160,15 +164,19 @@ public class RoundsMatch extends DefaultMatch {
 
                 if (gamePlayer != null) {
                     team.getPlayers().forEach(matchGamePlayer -> {
-                        matchGamePlayer.getData().incrementDeaths();
                         matchGamePlayer.setDead(true);
                     });
+                    if (lastAttacker != null && this.willEndMatchAfterRoundEnd(player)) {
+                        this.applySwingSlowly(lastAttacker);
+                    }
                     this.handleRoundEnd();
                 }
             } else {
                 MatchGamePlayer gamePlayer = participant.getLeader();
-                gamePlayer.getData().incrementDeaths();
                 gamePlayer.setDead(true);
+                if (lastAttacker != null && this.willEndMatchAfterRoundEnd(player)) {
+                    this.applySwingSlowly(lastAttacker);
+                }
                 this.handleRoundEnd();
             }
             return;
@@ -178,21 +186,8 @@ public class RoundsMatch extends DefaultMatch {
     }
 
     @Override
-    public void handleParticipant(Player player, MatchGamePlayer gamePlayer) {
-        super.handleParticipant(player, gamePlayer); // must call base to setDead(true)
-
-        GameParticipant<MatchGamePlayer> participant = this.getParticipantA().containsPlayer(player.getUniqueId())
-                ? this.getParticipantA()
-                : this.getParticipantB();
-        if (participant.getLeader().getData().getScore() == this.rounds) {
-            GameParticipant<MatchGamePlayer> opponent = participant == this.getParticipantA() ? this.getParticipantB() : this.getParticipantA();
-            opponent.getLeader().setEliminated(true);
-        }
-    }
-
-    @Override
     public void handleRespawn(Player player) {
-        player.spigot().respawn();
+        if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, false, true);
 
         Location spawnLocation = getParticipants().get(0).containsPlayer(player.getUniqueId()) ? this.getArena().getPos1() : this.getArena().getPos2();
@@ -216,9 +211,17 @@ public class RoundsMatch extends DefaultMatch {
 
     @Override
     public boolean canEndMatch() {
-        return (this.getParticipantA().getLeader().getData().getScore() == this.rounds || this.getParticipantB().getLeader().getData().getScore() == this.rounds)
+        return (this.getParticipantA().getLeader().getData().getScore() >= this.rounds || this.getParticipantB().getLeader().getData().getScore() >= this.rounds)
                 || (this.getParticipantA().getAllPlayers().stream().allMatch(MatchGamePlayer::isDisconnected)
                 || this.getParticipantB().getAllPlayers().stream().allMatch(MatchGamePlayer::isDisconnected));
+    }
+
+    @Override
+    protected boolean willEndMatchAfterRoundEnd(Player victim) {
+        GameParticipant<MatchGamePlayer> winner = this.getParticipantA().containsPlayer(victim.getUniqueId())
+                ? this.getParticipantB()
+                : this.getParticipantA();
+        return winner.getLeader().getData().getScore() + 1 >= this.rounds;
     }
 
     /**
@@ -239,9 +242,9 @@ public class RoundsMatch extends DefaultMatch {
         if (messageEnabled) {
             List<String> message;
             if (this.isTeamMatch()) {
-                message = localeService.getStringList(GameMessagesLocaleImpl.MATCH_SCORED_MESSAGE_SOLO_FORMAT);
-            } else {
                 message = localeService.getStringList(GameMessagesLocaleImpl.MATCH_SCORED_MESSAGE_TEAM_FORMAT);
+            } else {
+                message = localeService.getStringList(GameMessagesLocaleImpl.MATCH_SCORED_MESSAGE_SOLO_FORMAT);
             }
 
             message.forEach(line -> this.notifyAll(line

@@ -48,6 +48,7 @@ public class ArenaServiceImpl implements ArenaService {
 
     private final List<Arena> arenas = new ArrayList<>();
     private final List<StandAloneArena> temporaryArenas = new ArrayList<>();
+    private final Deque<Location> reusableCopyLocations = new ConcurrentLinkedDeque<>();
     private final AtomicInteger copyIdCounter = new AtomicInteger(0);
 
     private final Map<String, List<Arena>> arenasByKit = new ConcurrentHashMap<>();
@@ -80,7 +81,10 @@ public class ArenaServiceImpl implements ArenaService {
 
     @Override
     public void shutdown(AlleyContext context) {
-        cleanupTemporaryArenas();
+        // The temporary world is deleted as a whole below. Do not enqueue
+        // per-arena FAWE resets during shutdown because the schematic service
+        // is intentionally shut down earlier in the reverse service order.
+        this.temporaryArenas.clear();
 
         if (temporaryWorld != null) {
             String worldName = temporaryWorld.getName();
@@ -262,6 +266,15 @@ public class ArenaServiceImpl implements ArenaService {
         if (config.contains(name + ".enabled")) {
             arena.setEnabled(config.getBoolean(name + ".enabled"));
         }
+        if (arena instanceof StandAloneArena standAloneArena) {
+            standAloneArena.setSkyWarsArena(config.getBoolean(name + ".skywars.enabled", false));
+            List<Location> skyWarsSpawns = new ArrayList<>();
+            for (String serializedLocation : config.getStringList(name + ".skywars.spawns")) {
+                Location location = Serializer.deserializeLocation(serializedLocation);
+                if (location != null) skyWarsSpawns.add(location);
+            }
+            standAloneArena.setSkyWarsSpawns(skyWarsSpawns);
+        }
     }
 
     @Override
@@ -287,12 +300,34 @@ public class ArenaServiceImpl implements ArenaService {
         StandAloneArena copiedArena = originalArena.createCopy(temporaryWorld, copyLocation, copyId);
         copiedArena.setHeightLimit(copiedArena.getPos1().getBlockY() + copiedArena.getHeightLimit());
 
-        this.arenaSchematicService.paste(copyLocation, this.arenaSchematicService.getSchematicFile(originalArena.getName()));
+        File schematicFile = this.arenaSchematicService.getSchematicFile(originalArena.getName());
+        Location slotOrigin = new Location(temporaryWorld, copyLocation.getBlockX(), 100, copyLocation.getBlockZ());
+        copiedArena.setCopyOrigin(slotOrigin);
+
+        Location priorityMinimum = getPriorityMinimum(copiedArena);
+        Location priorityMaximum = getPriorityMaximum(copiedArena);
+        CompletableFuture<Void> spawnPaste = this.arenaSchematicService
+                .pasteRegionAsync(copyLocation, schematicFile, priorityMinimum, priorityMaximum);
+        CompletableFuture<Void> spawnReady = spawnPaste.thenCompose(ignored ->
+                preloadSpawnChunksAsync(copiedArena));
+        CompletableFuture<Void> fullPaste = spawnPaste.thenCompose(ignored ->
+                this.arenaSchematicService.pasteAsync(copyLocation, schematicFile));
+        fullPaste.exceptionally(throwable -> {
+            Logger.logException("Failed to finish standalone arena paste " + copiedArena.getName(),
+                    throwable instanceof Exception exception ? exception : new Exception(throwable));
+            return null;
+        });
+        copiedArena.setPreparationFutures(spawnReady, fullPaste);
         this.temporaryArenas.add(copiedArena);
         return copiedArena;
     }
 
     public Location getNextCopyLocationForArena(StandAloneArena originalArena) {
+        Location reusable = this.reusableCopyLocations.pollFirst();
+        if (reusable != null) {
+            return reusable.clone();
+        }
+
         Location location = this.nextCopyLocation.clone();
 
         Location originalPos1 = originalArena.getPos1();
@@ -312,11 +347,109 @@ public class ArenaServiceImpl implements ArenaService {
         return location;
     }
 
+    private Location getPriorityMinimum(StandAloneArena arena) {
+        return getPriorityBounds(arena)[0];
+    }
+
+    private Location getPriorityMaximum(StandAloneArena arena) {
+        return getPriorityBounds(arena)[1];
+    }
+
+    /**
+     * Returns a small union box around both spawns and the spectator center.
+     * The box is intentionally capped by the arena bounds so a huge map does
+     * not turn the fast path into another full-map paste.
+     */
+    private Location[] getPriorityBounds(StandAloneArena arena) {
+        Location min = arena.getMinimum();
+        Location max = arena.getMaximum();
+        int arenaMinX = Math.min(min.getBlockX(), max.getBlockX());
+        int arenaMinY = Math.min(min.getBlockY(), max.getBlockY());
+        int arenaMinZ = Math.min(min.getBlockZ(), max.getBlockZ());
+        int arenaMaxX = Math.max(min.getBlockX(), max.getBlockX());
+        int arenaMaxY = Math.max(min.getBlockY(), max.getBlockY());
+        int arenaMaxZ = Math.max(min.getBlockZ(), max.getBlockZ());
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+
+        List<Location> anchors = new ArrayList<>();
+        if (arena.getPos1() != null) anchors.add(arena.getPos1());
+        if (arena.getPos2() != null) anchors.add(arena.getPos2());
+        if (arena.getCenter() != null) anchors.add(arena.getCenter());
+        int radius = 2 * 16 + 8;
+        for (Location anchor : anchors) {
+            minX = Math.min(minX, anchor.getBlockX() - radius);
+            minY = Math.min(minY, anchor.getBlockY() - radius);
+            minZ = Math.min(minZ, anchor.getBlockZ() - radius);
+            maxX = Math.max(maxX, anchor.getBlockX() + radius);
+            maxY = Math.max(maxY, anchor.getBlockY() + radius);
+            maxZ = Math.max(maxZ, anchor.getBlockZ() + radius);
+        }
+        if (anchors.isEmpty()) {
+            minX = arenaMinX;
+            minY = arenaMinY;
+            minZ = arenaMinZ;
+            maxX = arenaMaxX;
+            maxY = arenaMaxY;
+            maxZ = arenaMaxZ;
+        } else {
+            minX = Math.max(arenaMinX, minX);
+            minY = Math.max(arenaMinY, minY);
+            minZ = Math.max(arenaMinZ, minZ);
+            maxX = Math.min(arenaMaxX, maxX);
+            maxY = Math.min(arenaMaxY, maxY);
+            maxZ = Math.min(arenaMaxZ, maxZ);
+        }
+        return new Location[]{
+                new Location(min.getWorld(), minX, minY, minZ),
+                new Location(min.getWorld(), maxX, maxY, maxZ)
+        };
+    }
+
+    private CompletableFuture<Void> preloadSpawnChunksAsync(StandAloneArena arena) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        Bukkit.getScheduler().runTask(this.plugin, () -> {
+            try {
+                World world = arena.getMinimum().getWorld();
+                if (world == null) {
+                    result.completeExceptionally(new IllegalStateException("Arena world is unavailable"));
+                    return;
+                }
+
+                Set<Long> chunkKeys = new HashSet<>();
+                for (Location anchor : Arrays.asList(arena.getPos1(), arena.getPos2(), arena.getCenter())) {
+                    if (anchor == null) continue;
+                    int chunkX = anchor.getBlockX() >> 4;
+                    int chunkZ = anchor.getBlockZ() >> 4;
+                    for (int x = chunkX - 2; x <= chunkX + 2; x++) {
+                        for (int z = chunkZ - 2; z <= chunkZ + 2; z++) {
+                            chunkKeys.add((((long) x) << 32) ^ (z & 0xffffffffL));
+                        }
+                    }
+                }
+
+                CompletableFuture<?>[] loads = chunkKeys.stream()
+                        .map(key -> world.getChunkAtAsync((int) (key >> 32), (int) (long) key, true))
+                        .toArray(CompletableFuture[]::new);
+                CompletableFuture.allOf(loads).whenComplete((ignored, throwable) -> {
+                    if (throwable == null) result.complete(null);
+                    else result.completeExceptionally(throwable);
+                });
+            } catch (Throwable throwable) {
+                result.completeExceptionally(throwable);
+            }
+        });
+        return result;
+    }
+
     public void cleanupTemporaryArenas() {
         for (StandAloneArena arena : new ArrayList<>(temporaryArenas)) {
-            arena.deleteCopiedArena();
+            deleteTemporaryArena(arena);
         }
-        this.temporaryArenas.clear();
     }
 
     /**
@@ -384,8 +517,19 @@ public class ArenaServiceImpl implements ArenaService {
         if (arena == null || !temporaryArenas.contains(arena)) {
             return;
         }
-        arena.deleteCopiedArena();
         this.temporaryArenas.remove(arena);
+
+        // Keep the slot reserved until the serialized FAWE delete has finished.
+        // Reusing it earlier would let a new match race the old cleanup.
+        arena.deleteCopiedArenaAsync().whenComplete((ignored, throwable) -> {
+            if (throwable != null) {
+                Logger.logException("Failed to reset temporary arena " + arena.getName(),
+                        throwable instanceof Exception exception ? exception : new Exception(throwable));
+            }
+            Location origin = arena.getCopyOrigin();
+            if (origin == null) return;
+            this.reusableCopyLocations.offerLast(origin.clone());
+        });
     }
 
     @Override
@@ -395,11 +539,47 @@ public class ArenaServiceImpl implements ArenaService {
             return null;
         }
 
-        Arena selectedArena = availableArenas.get(random.nextInt(availableArenas.size()));
+        List<Arena> nonSkyWarsArenas = availableArenas.stream()
+                .filter(arena -> !(arena instanceof StandAloneArena standAloneArena
+                        && standAloneArena.isSkyWarsArena()))
+                .collect(Collectors.toList());
+        if (nonSkyWarsArenas.isEmpty()) {
+            return null;
+        }
+
+        Arena selectedArena = nonSkyWarsArenas.get(random.nextInt(nonSkyWarsArenas.size()));
         if (selectedArena instanceof StandAloneArena) {
             return createTemporaryArenaCopy((StandAloneArena) selectedArena);
         }
         return selectedArena;
+    }
+
+    @Override
+    public boolean hasSkyWarsArena(Kit kit) {
+        if (kit == null) return false;
+        return this.arenas.stream()
+                .filter(StandAloneArena.class::isInstance)
+                .map(StandAloneArena.class::cast)
+                .anyMatch(arena -> arena.isEnabled()
+                        && arena.isSkyWarsArena()
+                        && arena.getKits().contains(kit.getName())
+                        && arena.getSkyWarsSpawns().size() >= 4);
+    }
+
+    @Override
+    public Arena getRandomSkyWarsArena(Kit kit) {
+        if (kit == null) return null;
+        List<StandAloneArena> availableArenas = this.arenas.stream()
+                .filter(StandAloneArena.class::isInstance)
+                .map(StandAloneArena.class::cast)
+                .filter(Arena::isEnabled)
+                .filter(StandAloneArena::isSkyWarsArena)
+                .filter(arena -> arena.getKits().contains(kit.getName()))
+                .filter(arena -> arena.getSkyWarsSpawns().size() >= 4)
+                .collect(Collectors.toList());
+        if (availableArenas.isEmpty()) return null;
+
+        return this.createTemporaryArenaCopy(availableArenas.get(this.random.nextInt(availableArenas.size())));
     }
 
     @Override
@@ -409,7 +589,10 @@ public class ArenaServiceImpl implements ArenaService {
 
     @Override
     public Arena selectArenaWithPotentialTemporaryCopy(Arena arena) {
-        if (arena instanceof StandAloneArena) {
+        // getRandomArena() may already return a temporary copy (e.g. the party split/FFA
+        // and random-duel paths). Copying a copy throws and leaks the first copy, so a
+        // copy that is already temporary is reused as-is instead of copied again.
+        if (arena instanceof StandAloneArena && !((StandAloneArena) arena).isTemporaryCopy()) {
             return createTemporaryArenaCopy((StandAloneArena) arena);
         }
         return arena;

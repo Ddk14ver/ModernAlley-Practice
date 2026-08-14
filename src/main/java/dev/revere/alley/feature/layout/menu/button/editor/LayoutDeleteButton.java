@@ -16,7 +16,7 @@ import org.bukkit.inventory.ItemStack;
 import java.util.List;
 
 /**
- * @author Ddk1 ClaudeCode
+ * @author Ddk1 dsv4pro
  * @project Alley
  * @since 13/07/2026
  */

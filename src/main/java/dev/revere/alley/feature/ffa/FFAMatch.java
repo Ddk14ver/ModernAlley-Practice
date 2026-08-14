@@ -10,6 +10,8 @@ import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.data.types.ProfileFFAData;
 import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.challenge.ChallengeService;
+import dev.revere.alley.feature.challenge.ChallengeType;
 import dev.revere.alley.feature.coin.CoinRewardService;
 import dev.revere.alley.feature.combat.CombatService;
 import dev.revere.alley.feature.ffa.model.GameFFAPlayer;
@@ -179,6 +181,8 @@ public abstract class FFAMatch {
         ProfileFFAData killerFfaData = killerProfile.getProfileData().getFfaData().get(this.getKit().getName());
         killerFfaData.incrementKills();
         killerFfaData.incrementKillstreak();
+        this.plugin.getService(ChallengeService.class)
+                .recordProgress(killerProfile, ChallengeType.KILLS, 1);
 
         this.plugin.getService(CoinRewardService.class).rewardFFAKill(killer);
 

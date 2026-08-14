@@ -129,8 +129,10 @@ public class BedMatch extends DefaultMatch {
             int fadeOut = localeService.getInt(VisualsLocaleImpl.TITLE_MATCH_BED_DESTROYED_FADEOUT);
 
             opponentParticipant.getPlayers().forEach(matchGamePlayer -> {
-                Player p = this.plugin.getServer().getPlayer(matchGamePlayer.getUuid());
-                titleService.sendTitle(p, bedDestroyedHeader, bedDestroyedFooter, fadeIn, stay, fadeOut);
+                Player p = matchGamePlayer.getTeamPlayer();
+                if (p != null) {
+                    titleService.sendTitle(p, bedDestroyedHeader, bedDestroyedFooter, fadeIn, stay, fadeOut);
+                }
             });
         }
 

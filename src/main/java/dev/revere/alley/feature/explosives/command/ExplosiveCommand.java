@@ -7,8 +7,10 @@ import dev.revere.alley.feature.explosives.ExplosiveService;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
+import dev.revere.alley.library.command.annotation.CompleterData;
 import org.bukkit.command.CommandSender;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -21,6 +23,21 @@ import java.util.List;
  * @自 24/06/2025
  */
 public class ExplosiveCommand extends BaseCommand {
+    @CompleterData(name = "explosive")
+    public List<String> explosiveCompleter(CommandArgs command) {
+        List<String> completion = new ArrayList<>();
+
+        if (command.getArgs().length != 1) {
+            return completion;
+        }
+        if (!command.getSender().hasPermission(this.getAdminPermission())) {
+            return completion;
+        }
+
+        completion.addAll(Arrays.asList("explosion", "range", "horizontal", "vertical", "speed", "fuse"));
+        return completion;
+    }
+
     @CommandData(
             name = "explosive",
             aliases = {"expl"},

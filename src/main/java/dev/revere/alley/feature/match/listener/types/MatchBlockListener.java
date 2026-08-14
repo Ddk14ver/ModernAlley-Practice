@@ -37,6 +37,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.*;
+import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerBedEnterEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
@@ -44,6 +45,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -268,6 +270,10 @@ public class MatchBlockListener implements Listener {
                     if (match.getPlacedBlocks().containsKey(blockState)) {
                         match.removeBlockFromPlacedBlocksMap(blockState, event.getBlock().getLocation());
                     } else if (breakArenaBlocks) {
+                        // Arena blocks are restored at the end of the match, so they
+                        // should not drop any items when broken.
+                        event.setDropItems(false);
+                        event.setExpToDrop(0);
                         match.addBlockToBrokenBlocksMap(blockState, event.getBlock().getLocation());
                     } else {
                         event.setCancelled(true);

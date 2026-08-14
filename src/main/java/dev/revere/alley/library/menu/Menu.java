@@ -215,6 +215,15 @@ public abstract class Menu {
         return ((9 * y) + x);
     }
 
+    /**
+     * Whether the given top-inventory slot should behave like a regular, freely editable
+     * inventory slot (item take/place allowed) instead of a button or locked slot.
+     * 指定顶部库存槽位是否应像普通可自由编辑的库存槽位一样（允许拿取/放置物品）。
+     */
+    public boolean isEditableSlot(int slot) {
+        return false;
+    }
+
     public abstract String getTitle(Player player);
 
     public abstract Map<Integer, Button> getButtons(Player player);

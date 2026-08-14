@@ -7,6 +7,7 @@ import org.bukkit.Location;
 
 import java.io.File;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * @author Remi
@@ -56,6 +57,22 @@ public interface ArenaSchematicService extends Service {
     void paste(Location location, File schematicFile);
 
     /**
+     * Asynchronously pastes a schematic without blocking the server thread.
+     *
+     * @param location destination corresponding to the clipboard minimum
+     * @param schematicFile schematic file
+     * @return a future completed when FAWE has finished queuing/flushing the edit
+     */
+    CompletableFuture<Void> pasteAsync(Location location, File schematicFile);
+
+    /**
+     * Asynchronously pastes only a clipped source region. This is used to make
+     * the player spawn area available before the rest of a large arena is copied.
+     */
+    CompletableFuture<Void> pasteRegionAsync(Location location, File schematicFile,
+                                             Location targetMinimum, Location targetMaximum);
+
+    /**
      * Deletes the physical blocks of a temporary arena from the world.
      * 从世界中删除临时竞技场的物理方块。
      *
@@ -63,6 +80,11 @@ public interface ArenaSchematicService extends Service {
      *              要删除的临时 StandAloneArena。
      */
     void delete(StandAloneArena arena);
+
+    /**
+     * Deletes a temporary arena on the bounded FAWE executor.
+     */
+    CompletableFuture<Void> deleteAsync(StandAloneArena arena);
 
     /**
      * Gets the schematic file for an arena by its name.

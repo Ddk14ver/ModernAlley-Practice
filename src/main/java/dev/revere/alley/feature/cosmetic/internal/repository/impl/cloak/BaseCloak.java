@@ -6,11 +6,8 @@ import org.bukkit.util.Vector;
 
 /**
  * @author Remi
- * @author 雷米
  * @project alley-practice
- * @project alley-practice 项目
  * @date 4/08/2025
- * @date 2025年4月8日
  */
 public abstract class BaseCloak extends BaseCosmetic {
     /**

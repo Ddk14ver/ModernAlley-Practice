@@ -10,6 +10,8 @@ import dev.revere.alley.core.locale.internal.impl.SettingsLocaleImpl;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.feature.arena.Arena;
+import dev.revere.alley.feature.arena.ArenaService;
+import dev.revere.alley.feature.arena.internal.types.StandAloneArena;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.KitSetting;
 import dev.revere.alley.feature.kit.setting.types.mode.*;
@@ -18,6 +20,7 @@ import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatListener;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
 import dev.revere.alley.feature.match.internal.types.*;
+import dev.revere.alley.feature.event.skywars.SkyWarsMatch;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.queue.Queue;
@@ -34,7 +37,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * @author Remi
+ * @author Remi Ddk1
  * @project Alley
  * @date 5/21/2024
  */
@@ -112,7 +115,7 @@ public class MatchServiceImpl implements MatchService {
             // Directly clean up player state without scheduling tasks
             for (var participant : match.getParticipants()) {
                 for (var gp : participant.getPlayers()) {
-                    org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayer(gp.getUuid());
+                    org.bukkit.entity.Player player = gp.getTeamPlayer();
                     if (player != null && player.isOnline()) {
                         if (legacyCombatService != null) legacyCombatService.removeAll(player);
                         dev.revere.alley.core.profile.Profile prof = AlleyPlugin.getInstance()
@@ -143,7 +146,7 @@ public class MatchServiceImpl implements MatchService {
         if (legacyCombatService != null && match.getKit() != null) {
             for (GameParticipant<MatchGamePlayer> participant : match.getParticipants()) {
                 for (MatchGamePlayer player : participant.getPlayers()) {
-                    Player bukkitPlayer = Bukkit.getPlayer(player.getUuid());
+                    Player bukkitPlayer = player.getTeamPlayer();
                     if (bukkitPlayer != null) {
                         legacyCombatService.removeAll(bukkitPlayer);
                     }
@@ -170,6 +173,18 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
+    public Match createMatch(Queue queue, Kit kit, Arena arena, boolean isRanked,
+                             GameParticipant<MatchGamePlayer> participantA,
+                             GameParticipant<MatchGamePlayer> participantB) {
+        for (Map.Entry<Class<? extends KitSetting>, MatchFactory> entry : matchFactoryRegistry.entrySet()) {
+            if (kit.isSettingEnabled(entry.getKey())) {
+                return entry.getValue().create(queue, kit, arena, isRanked, participantA, participantB);
+            }
+        }
+        return new DefaultMatch(queue, kit, arena, isRanked, participantA, participantB);
+    }
+
+    @Override
     public void createAndStartMatch(Kit kit, Arena arena, GameParticipant<MatchGamePlayer> participantA, GameParticipant<MatchGamePlayer> participantB, boolean teamMatch, boolean affectStatistics, boolean isRanked) {
         Profile profileA = this.profileService.getProfile(participantA.getPlayers().get(0).getUuid());
         Profile profileB = this.profileService.getProfile(participantB.getPlayers().get(0).getUuid());
@@ -182,32 +197,19 @@ public class MatchServiceImpl implements MatchService {
                 .findFirst()
                 .orElse(null);
 
-        MatchFactory factory = null;
-        for (Map.Entry<Class<? extends KitSetting>, MatchFactory> entry : matchFactoryRegistry.entrySet()) {
-            if (kit.isSettingEnabled(entry.getKey())) {
-                factory = entry.getValue();
-                break;
-            }
-        }
-
-        Match match;
-        if (factory != null) {
-            match = factory.create(matchingQueue, kit, arena, isRanked, participantA, participantB);
-        } else {
-            match = new DefaultMatch(matchingQueue, kit, arena, isRanked, participantA, participantB);
-        }
+        Match match = createMatch(matchingQueue, kit, arena, isRanked, participantA, participantB);
 
         match.setTeamMatch(teamMatch);
         match.setAffectStatistics(affectStatistics);
 
         this.addMatch(match);
-        match.startMatch();
+        startMatchWhenArenaReady(match);
 
         // Apply 1.8 legacy combat mechanics if enabled for this kit
         if (legacyCombatService != null) {
             for (GameParticipant<MatchGamePlayer> participant : java.util.List.of(participantA, participantB)) {
                 for (MatchGamePlayer player : participant.getPlayers()) {
-                    Player bukkitPlayer = Bukkit.getPlayer(player.getUuid());
+                    Player bukkitPlayer = player.getTeamPlayer();
                     if (bukkitPlayer != null) {
                         legacyCombatService.applyKit(bukkitPlayer, kit);
                     }
@@ -235,13 +237,13 @@ public class MatchServiceImpl implements MatchService {
                 ? new GomokuFFAMatch(matchingQueue, kit, arena, participants)
                 : new FFAMatch(matchingQueue, kit, arena, participants);
         this.addMatch(match);
-        match.startMatch();
+        startMatchWhenArenaReady(match);
 
         // Apply 1.8 legacy combat mechanics if enabled for this kit
         if (legacyCombatService != null) {
             for (GameParticipant<MatchGamePlayer> participant : participants) {
                 for (MatchGamePlayer player : participant.getPlayers()) {
-                    Player bukkitPlayer = Bukkit.getPlayer(player.getUuid());
+                    Player bukkitPlayer = player.getTeamPlayer();
                     if (bukkitPlayer != null) {
                         legacyCombatService.applyKit(bukkitPlayer, kit);
                     }
@@ -251,21 +253,41 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
-    public void createTournamentMatch(Tournament tournament, Kit kit, Arena arena, GameParticipant<MatchGamePlayer> participantA, GameParticipant<MatchGamePlayer> participantB) {
-        MatchFactory factory = null;
-        for (Map.Entry<Class<? extends KitSetting>, MatchFactory> entry : matchFactoryRegistry.entrySet()) {
-            if (kit.isSettingEnabled(entry.getKey())) {
-                factory = entry.getValue();
-                break;
+    public SkyWarsMatch createAndStartSkyWarsMatch(Kit kit, Arena arena,
+                                                    List<GameParticipant<MatchGamePlayer>> participants, Kit resourceKit) {
+        for (GameParticipant<MatchGamePlayer> participant : participants) {
+            Profile profile = this.profileService.getProfile(participant.getLeader().getUuid());
+            if (profile != null && profile.getMatch() != null) {
+                Logger.warn("Profile " + profile.getName() + " is already in a match. Cannot start SkyWars.");
+                return null;
             }
         }
 
-        Match match;
-        if (factory != null) {
-            match = factory.create(null, kit, arena, false, participantA, participantB);
-        } else {
-            match = new DefaultMatch(null, kit, arena, false, participantA, participantB);
+        Queue matchingQueue = this.queueService.getQueues().stream()
+                .filter(queue -> queue.getKit().equals(kit))
+                .findFirst()
+                .orElse(null);
+
+        SkyWarsMatch match = new SkyWarsMatch(matchingQueue, kit, arena, participants, resourceKit);
+        this.addMatch(match);
+        startMatchWhenArenaReady(match);
+
+        if (legacyCombatService != null) {
+            for (GameParticipant<MatchGamePlayer> participant : participants) {
+                for (MatchGamePlayer player : participant.getPlayers()) {
+                    Player bukkitPlayer = player.getTeamPlayer();
+                    if (bukkitPlayer != null) {
+                        legacyCombatService.applyKit(bukkitPlayer, kit);
+                    }
+                }
+            }
         }
+        return match;
+    }
+
+    @Override
+    public void createTournamentMatch(Tournament tournament, Kit kit, Arena arena, GameParticipant<MatchGamePlayer> participantA, GameParticipant<MatchGamePlayer> participantB) {
+        Match match = createMatch(null, kit, arena, false, participantA, participantB);
 
         match.setTournament(tournament);
         match.setAffectStatistics(false);
@@ -274,13 +296,13 @@ public class MatchServiceImpl implements MatchService {
         tournament.addActiveMatch(match);
 
         this.addMatch(match);
-        match.startMatch();
+        startMatchWhenArenaReady(match);
 
         // Apply 1.8 legacy combat mechanics if enabled for this kit
         if (legacyCombatService != null) {
             for (GameParticipant<MatchGamePlayer> participant : java.util.List.of(participantA, participantB)) {
                 for (MatchGamePlayer player : participant.getPlayers()) {
-                    Player bukkitPlayer = Bukkit.getPlayer(player.getUuid());
+                    Player bukkitPlayer = player.getTeamPlayer();
                     if (bukkitPlayer != null) {
                         legacyCombatService.applyKit(bukkitPlayer, kit);
                     }
@@ -297,5 +319,65 @@ public class MatchServiceImpl implements MatchService {
         }
 
         this.blockedCommands.addAll(blockedCommands);
+    }
+
+    /**
+     * Starts a normal match immediately for shared arenas. Standalone arenas
+     * prepare their spawn region asynchronously; the callback is completed on
+     * the main thread and never blocks it with Future#get/join.
+     */
+    private void startMatchWhenArenaReady(Match match) {
+        if (!(match.getArena() instanceof StandAloneArena standalone)) {
+            match.startMatch();
+            return;
+        }
+
+        // Reserve the players immediately so queue/event callers see the match
+        // synchronously, while the actual inventory setup and teleport happen
+        // after the priority region is ready.
+        match.getParticipants().forEach(participant -> participant.getPlayers().forEach(gamePlayer -> {
+            Profile profile = this.profileService.getProfile(gamePlayer.getUuid());
+            if (profile != null) {
+                profile.setState(dev.revere.alley.core.profile.enums.ProfileState.PLAYING);
+                profile.setMatch(match);
+            }
+        }));
+
+        standalone.getSpawnReadyFuture().whenComplete((ignored, throwable) ->
+                Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+                    if (throwable != null) {
+                        Logger.logException("Failed to prepare standalone arena " + standalone.getName(),
+                                throwable instanceof Exception exception ? exception : new Exception(throwable));
+                        this.removeMatch(match);
+                        clearReservedProfiles(match);
+                        AlleyPlugin.getInstance().getService(ArenaService.class).deleteTemporaryArena(standalone);
+                        return;
+                    }
+
+                    boolean playersReady = match.getParticipants().stream()
+                            .flatMap(participant -> participant.getPlayers().stream())
+                            .allMatch(gamePlayer -> {
+                                Player player = gamePlayer.getTeamPlayer();
+                                return player != null && player.isOnline();
+                            });
+                    if (!playersReady) {
+                        this.removeMatch(match);
+                        clearReservedProfiles(match);
+                        AlleyPlugin.getInstance().getService(ArenaService.class).deleteTemporaryArena(standalone);
+                        return;
+                    }
+
+                    match.startMatch();
+                }));
+    }
+
+    private void clearReservedProfiles(Match match) {
+        match.getParticipants().forEach(participant -> participant.getPlayers().forEach(gamePlayer -> {
+            Profile profile = this.profileService.getProfile(gamePlayer.getUuid());
+            if (profile != null && profile.getMatch() == match) {
+                profile.setMatch(null);
+                profile.setState(dev.revere.alley.core.profile.enums.ProfileState.LOBBY);
+            }
+        }));
     }
 }

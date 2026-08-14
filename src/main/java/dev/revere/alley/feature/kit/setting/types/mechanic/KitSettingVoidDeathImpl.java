@@ -5,11 +5,8 @@ import dev.revere.alley.feature.kit.setting.annotation.KitSettingData;
 
 /**
  * @author Remi
- * 作者: Remi
  * @project alley-practice
- * 项目: alley-practice
  * @date 21/06/2025
- * 日期: 21/06/2025
  */
 @KitSettingData(name = "VoidDeath", description = "Kill the player on certain void level", enabled = false)
 public class KitSettingVoidDeathImpl extends KitSetting {

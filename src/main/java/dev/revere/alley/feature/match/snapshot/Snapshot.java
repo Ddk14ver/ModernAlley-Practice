@@ -32,6 +32,7 @@ public class Snapshot {
 
     private final ItemStack[] armor;
     private final ItemStack[] inventory;
+    private ItemStack offhand;
 
     private final List<String> potionEffects;
 
@@ -46,7 +47,9 @@ public class Snapshot {
     private double averageCombatCps;
     private int highestCombatCps;
 
-    private int wTaps;
+    private int wTapAttempts;
+    private int wTapSuccesses;
+    private double regen;
 
     private long createdAt;
 
@@ -70,6 +73,7 @@ public class Snapshot {
 
         this.armor = InventoryUtil.cloneItemStackArray(player.getInventory().getArmorContents());
         this.inventory = InventoryUtil.cloneItemStackArray(player.getInventory().getContents());
+        this.offhand = player.getInventory().getItemInOffHand();
         this.potionEffects = player.getActivePotionEffects().stream()
                 .map(effect -> effect.getType().getName() + " " + effect.getAmplifier())
                 .collect(Collectors.toList());
@@ -85,7 +89,9 @@ public class Snapshot {
         this.averageCombatCps = 0.0D;
         this.highestCombatCps = 0;
 
-        this.wTaps = 0;
+        this.wTapAttempts = 0;
+        this.wTapSuccesses = 0;
+        this.regen = 0;
 
         this.createdAt = System.currentTimeMillis();
     }
@@ -122,5 +128,15 @@ public class Snapshot {
             }
         }
         return amount;
+    }
+
+    /**
+     * W-tap rate as a percentage of all W-tap attempts (successful / attempts), matching the
+     * reference PotPvP calcWTap calculation. Returns 0 when there were no attempts.
+     * W-tap 命中率 = 成功 W-tap 次数 / W-tap 尝试次数；无尝试时返回 0。
+     */
+    public int getWTapPercentage() {
+        if (this.wTapAttempts <= 0) return 0;
+        return Math.round(100.0F * this.wTapSuccesses / this.wTapAttempts);
     }
 }

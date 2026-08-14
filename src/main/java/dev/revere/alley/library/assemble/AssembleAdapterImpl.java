@@ -34,6 +34,7 @@ public class AssembleAdapterImpl implements AssembleAdapter {
     private final SpectatorScoreboardImpl spectatorScoreboardImpl = new SpectatorScoreboardImpl();
     private final FFAScoreboardImpl ffaScoreboardImpl = new FFAScoreboardImpl();
     private final TournamentScoreboardImpl tournamentScoreboardImpl = new TournamentScoreboardImpl();
+    private final EventScoreboardImpl eventScoreboardImpl = new EventScoreboardImpl();
 
     public AssembleAdapterImpl(AnimationService animationService, ProfileService profileService, ConfigService configService) {
         this.animationService = animationService;
@@ -92,6 +93,9 @@ public class AssembleAdapterImpl implements AssembleAdapter {
                     break;
                 case TOURNAMENT_LOBBY:
                     lines.addAll(this.tournamentScoreboardImpl.getLines(profile));
+                    break;
+                case PLAYING_EVENT:
+                    lines.addAll(this.eventScoreboardImpl.getLines(profile));
                     break;
                 case SPECTATING:
                     lines.addAll(this.spectatorScoreboardImpl.getLines(profile));

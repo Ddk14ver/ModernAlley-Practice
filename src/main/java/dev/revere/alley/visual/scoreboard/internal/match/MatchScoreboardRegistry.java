@@ -2,6 +2,7 @@ package dev.revere.alley.visual.scoreboard.internal.match;
 
 import dev.revere.alley.feature.kit.setting.KitSetting;
 import dev.revere.alley.feature.match.Match;
+import dev.revere.alley.feature.event.skywars.SkyWarsMatch;
 import dev.revere.alley.visual.scoreboard.internal.match.annotation.ScoreboardData;
 import dev.revere.alley.common.logger.Logger;
 import io.github.classgraph.ClassGraph;
@@ -73,6 +74,15 @@ public class MatchScoreboardRegistry {
      *         解析后的 IMatchScoreboard。
      */
     public MatchScoreboard getScoreboard(Match match) {
+        // SkyWars must always expose its opening-protection countdown, even if
+        // its gameplay kit also has a generic setting-specific scoreboard.
+        if (match instanceof SkyWarsMatch) {
+            MatchScoreboard skyWarsScoreboard = matchTypeScoreboards.get(SkyWarsMatch.class);
+            if (skyWarsScoreboard != null) {
+                return skyWarsScoreboard;
+            }
+        }
+
         for (Class<? extends KitSetting> settingClass : kitSettingScoreboards.keySet()) {
             if (match.getKit().isSettingEnabled(settingClass)) {
                 return kitSettingScoreboards.get(settingClass);

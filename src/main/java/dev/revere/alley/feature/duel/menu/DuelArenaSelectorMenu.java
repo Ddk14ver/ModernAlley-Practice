@@ -19,11 +19,8 @@ import java.util.Map;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 17/10/2024 - 22:13
- * 日期：2024年10月17日 - 22:13
  */
 @AllArgsConstructor
 public class DuelArenaSelectorMenu extends PaginatedMenu {

@@ -5,11 +5,8 @@ import dev.revere.alley.feature.kit.setting.annotation.KitSettingData;
 
 /**
  * @author Remi
- * 作者: Remi
  * @project alley-practice
- * 项目: alley-practice
  * @date 13/08/2025
- * 日期: 13/08/2025
  */
 @KitSettingData(name = "PearlCooldown", description = "Sets the ender pearl cooldown in seconds. 0 disables it.", enabled = true)
 public class KitSettingPearlCooldownImpl extends KitSetting {

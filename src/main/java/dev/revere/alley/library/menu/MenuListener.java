@@ -26,6 +26,16 @@ public class MenuListener implements Listener {
                 return;
             }
 
+            // Freely editable top-inventory slots (e.g. the layout editor's offhand slot)
+            // allow normal take/place interactions like the player's own inventory.
+            if (openMenu.isEditableSlot(event.getSlot())) {
+                if (event.getClick() == ClickType.SHIFT_LEFT || event.getClick() == ClickType.SHIFT_RIGHT) {
+                    event.setCancelled(true);
+                }
+
+                return;
+            }
+
             if (openMenu.getButtons().containsKey(event.getSlot())) {
                 Button button = openMenu.getButtons().get(event.getSlot());
                 boolean cancel = button.shouldCancel(player, event.getClick());

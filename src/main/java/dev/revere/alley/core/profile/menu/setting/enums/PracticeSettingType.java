@@ -201,6 +201,17 @@ public enum PracticeSettingType {
             )
     ),
 
+    CHALLENGES(32, "&6&lChallenges", Material.PAPER,
+            settings -> Arrays.asList(
+                    CC.MENU_BAR,
+                    "&7Complete daily and weekly tasks",
+                    "&7to earn coins.",
+                    "",
+                    "&aClick to view.",
+                    CC.MENU_BAR
+            )
+    ),
+
     HIDE_PLAYERS(23, "&6&lHide Players", Material.PLAYER_HEAD, settings -> Arrays.asList(
             CC.MENU_BAR,
             "&7Hide all other players",

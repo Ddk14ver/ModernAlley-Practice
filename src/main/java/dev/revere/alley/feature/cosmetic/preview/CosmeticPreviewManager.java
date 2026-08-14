@@ -94,8 +94,8 @@ public final class CosmeticPreviewManager implements Listener {
             player.sendMessage(CC.translate("&cA kill effect preview is already running."));
             return;
         }
-        if (!AlleyPlugin.getInstance().getServer().getPluginManager().isPluginEnabled("Citizens")) {
-            player.sendMessage(CC.translate("&cCitizens is required to preview kill effects."));
+        if (!dev.revere.alley.feature.bot.entity.NativeBotPlayer.isSupported()) {
+            player.sendMessage(CC.translate("&cNative player previews are not supported by this server build."));
             return;
         }
 
@@ -126,7 +126,7 @@ public final class CosmeticPreviewManager implements Listener {
 
         PreviewSession session = new PreviewSession(fixed.clone(), returnMenu);
         killEffectSessions.put(player.getUniqueId(), session);
-        boolean started = CitizensKillEffectPreview.start(player, effect, dummyLocation,
+        boolean started = NativeKillEffectPreview.start(player, effect, dummyLocation,
                 () -> finishKillEffectPreview(player.getUniqueId(), true));
         if (!started) {
             killEffectSessions.remove(player.getUniqueId());
@@ -160,7 +160,7 @@ public final class CosmeticPreviewManager implements Listener {
 
     public void shutdown() {
         for (UUID playerId : killEffectSessions.keySet()) {
-            CitizensKillEffectPreview.cancel(playerId);
+            NativeKillEffectPreview.cancel(playerId);
         }
         killEffectSessions.clear();
         soundCooldowns.clear();
@@ -178,7 +178,7 @@ public final class CosmeticPreviewManager implements Listener {
     private void onQuit(PlayerQuitEvent event) {
         UUID playerId = event.getPlayer().getUniqueId();
         if (killEffectSessions.containsKey(playerId)) {
-            CitizensKillEffectPreview.cancel(playerId);
+            NativeKillEffectPreview.cancel(playerId);
         }
         finishKillEffectPreview(playerId, false);
         soundCooldowns.remove(playerId);

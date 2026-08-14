@@ -24,9 +24,16 @@ public class ArenaAddKitCommand extends BaseCommand {
     @CompleterData(name = "arena.addkit")
     public List<String> arenaAddKitCompleter(CommandArgs command) {
         List<String> completion = new ArrayList<>();
+        String[] args = command.getArgs();
 
-        if (command.getArgs().length == 1 && command.getPlayer().hasPermission(this.getAdminPermission())) {
+        if (!command.getPlayer().hasPermission(this.getAdminPermission())) {
+            return completion;
+        }
+
+        if (args.length == 1) {
             this.plugin.getService(ArenaService.class).getArenas().forEach(arena -> completion.add(arena.getName()));
+        } else if (args.length == 2) {
+            this.plugin.getService(KitService.class).getKits().forEach(kit -> completion.add(kit.getName()));
         }
 
         return completion;

@@ -136,24 +136,28 @@ public class LevelServiceImpl implements LevelService {
                 .orElse(null);
     }
 
+    @Override
+    public LevelData getNextLevel(int elo) {
+        LevelData current = this.getLevel(elo);
+        if (current == null) {
+            return null;
+        }
+
+        int index = this.levels.indexOf(current);
+        if (index != -1 && index < this.levels.size() - 1) {
+            return this.levels.get(index + 1);
+        }
+        return null;
+    }
+
     /**
      * Helper method to determine the total ELO span for a given level's progression.
      * 用于确定给定等级晋级所需的总 ELO 跨度的辅助方法。
-     * This is the ELO needed to get from the start of the current level to the start of the next one.
-     * 即从当前等级的起点到下一等级起点所需的 ELO。
+     * The range belongs to the current level itself: max-elo - min-elo.
+     * 进度范围属于当前段位本身：max-elo - min-elo。
      */
     private int getEloRequiredForLevel(LevelData level) {
-        int currentLevelIndex = this.levels.indexOf(level);
-        int minElo = level.getMinElo();
-        int maxEloForSpan;
-
-        if (currentLevelIndex != -1 && currentLevelIndex < this.levels.size() - 1) {
-            LevelData nextLevel = this.levels.get(currentLevelIndex + 1);
-            maxEloForSpan = nextLevel.getMinElo();
-        } else {
-            maxEloForSpan = level.getMaxElo();
-        }
-        return maxEloForSpan - minElo;
+        return Math.max(0, level.getMaxElo() - level.getMinElo());
     }
 
     @Override
@@ -164,14 +168,17 @@ public class LevelServiceImpl implements LevelService {
         }
 
         int eloForNextLevel = getEloRequiredForLevel(level);
-        int currentProgress = elo - level.getMinElo();
+        int currentProgress = Math.max(0, Math.min(
+                elo - level.getMinElo(), eloForNextLevel));
 
-        if (currentProgress < 0) {
-            currentProgress = 0;
+        // Once the span is reached or there is no next level, render a full bar
+        // (the old code hardcoded 11/12 which made every maxed-out level look partial).
+        if (eloForNextLevel <= 0) {
+            return ProgressBarUtil.generate(1, 1, 8, "■");
         }
 
-        if (eloForNextLevel <= 0 || currentProgress >= eloForNextLevel) {
-            return ProgressBarUtil.generate(11, 12, 8, "■");
+        if (currentProgress >= eloForNextLevel) {
+            return ProgressBarUtil.generate(eloForNextLevel, eloForNextLevel, 8, "■");
         }
 
         return ProgressBarUtil.generate(currentProgress, eloForNextLevel, 8, "■");
@@ -187,24 +194,15 @@ public class LevelServiceImpl implements LevelService {
 
         int eloSpanForLevel = getEloRequiredForLevel(level);
 
-        if (eloSpanForLevel <= 0) {
-            return "99%";
-        }
+        if (eloSpanForLevel <= 0) return "100%";
 
-        int currentProgress = elo - level.getMinElo();
-
-        if (currentProgress < 0) {
-            currentProgress = 0;
-        }
+        int currentProgress = Math.max(0, Math.min(
+                elo - level.getMinElo(), eloSpanForLevel));
 
         double percentage = ((double) currentProgress / eloSpanForLevel) * 100;
 
         int finalPercentage = (int) Math.floor(percentage);
 
-        if (finalPercentage >= 100) {
-            return "99%";
-        }
-
-        return finalPercentage + "%";
+        return Math.min(100, finalPercentage) + "%";
     }
 }

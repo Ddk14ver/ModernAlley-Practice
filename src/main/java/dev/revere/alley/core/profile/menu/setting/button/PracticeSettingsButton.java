@@ -1,7 +1,6 @@
 package dev.revere.alley.core.profile.menu.setting.button;
 
 import dev.revere.alley.AlleyPlugin;
-import dev.revere.alley.common.constants.MessageConstant;
 import dev.revere.alley.common.item.ItemBuilder;
 import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
@@ -9,8 +8,10 @@ import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.enums.WorldTime;
 import dev.revere.alley.core.profile.menu.music.MusicDiscSelectorMenu;
+import dev.revere.alley.core.profile.menu.setting.MatchSettingsMenu;
 import dev.revere.alley.core.profile.menu.setting.enums.PracticeSettingType;
 import dev.revere.alley.core.profile.menu.shop.ShopMenu;
+import dev.revere.alley.feature.challenge.menu.ChallengeMenu;
 import dev.revere.alley.feature.cosmetic.menu.CosmeticsMenu;
 import dev.revere.alley.feature.division.menu.DivisionsMenu;
 import dev.revere.alley.feature.level.menu.LevelMenu;
@@ -89,8 +90,7 @@ public class PracticeSettingsButton extends Button {
                 player.performCommand("togglehideplayers");
                 break;
             case MATCH_SETTINGS:
-                player.closeInventory();
-                player.sendMessage(MessageConstant.IN_DEVELOPMENT);
+                new MatchSettingsMenu().openMenu(player);
                 break;
             case COSMETICS:
                 new CosmeticsMenu().openMenu(player);
@@ -109,6 +109,9 @@ public class PracticeSettingsButton extends Button {
                 break;
             case LEVELS:
                 new LevelMenu(profile).openMenu(player);
+                break;
+            case CHALLENGES:
+                new ChallengeMenu(profile).openMenu(player);
                 break;
         }
 

@@ -6,11 +6,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- * 作者：Remi
  * @project Alley
- * 项目：Alley
  * @date 6/23/2025
- * 日期：2025年6月23日
  */
 public abstract class ProjectileTrail extends BaseCosmetic {
     /**

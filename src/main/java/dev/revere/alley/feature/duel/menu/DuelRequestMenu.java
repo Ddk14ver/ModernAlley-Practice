@@ -21,11 +21,8 @@ import java.util.Map;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 17/10/2024 - 20:11
- * 日期：2024年10月17日 - 20:11
  */
 @AllArgsConstructor
 public class DuelRequestMenu extends Menu {

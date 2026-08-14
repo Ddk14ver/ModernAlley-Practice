@@ -87,7 +87,6 @@
                                         <exclude>me/clip/**</exclude>
                                         <exclude>com/comphenix/**</exclude>
                                         <exclude>com/fastasyncworldedit/**</exclude>
-                                        <exclude>net/citizensnpcs/**</exclude>
                                         <exclude>com/sk89q/**</exclude>
                                         <exclude>xyz/refinedev/**</exclude>
                                         <exclude>me/activated/**</exclude>
@@ -161,10 +160,6 @@
         <repository>
             <id>sonatype</id>
             <url>https://oss.sonatype.org/content/groups/public/</url>
-        </repository>
-        <repository>
-            <id>citizens-repo</id>
-            <url>https://maven.citizensnpcs.co/repo</url>
         </repository>
         <repository>
             <id>codemc-repo</id>
@@ -259,15 +254,6 @@
             <groupId>me.clip</groupId>
             <artifactId>placeholderapi</artifactId>
             <version>2.11.6</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <!-- Citizens API -->
-        <dependency>
-            <groupId>net.citizensnpcs</groupId>
-            <artifactId>citizensapi</artifactId>
-            <version>2.0.36-SNAPSHOT</version>
-            <type>jar</type>
             <scope>provided</scope>
         </dependency>
 

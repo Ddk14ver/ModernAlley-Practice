@@ -7,7 +7,6 @@ import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.wrappers.EnumWrappers;
 import dev.revere.alley.AlleyPlugin;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -51,19 +50,13 @@ public final class CPSListener implements Listener {
                 AlleyPlugin.getInstance(),
                 ListenerPriority.MONITOR,
                 PacketType.Play.Client.ARM_ANIMATION,
-                PacketType.Play.Client.BLOCK_DIG,
-                PacketType.Play.Client.USE_ENTITY
+                PacketType.Play.Client.BLOCK_DIG
         ) {
             @Override
             public void onPacketReceiving(PacketEvent event) {
                 UUID playerId = event.getPlayer().getUniqueId();
                 if (event.getPacketType() == PacketType.Play.Client.BLOCK_DIG) {
                     handleDigPacket(playerId, event);
-                    return;
-                }
-
-                if (event.getPacketType() == PacketType.Play.Client.USE_ENTITY) {
-                    handleCombatAttackPacket(event);
                     return;
                 }
 
@@ -83,17 +76,6 @@ public final class CPSListener implements Listener {
         } else if (action == EnumWrappers.PlayerDigType.ABORT_DESTROY_BLOCK
                 || action == EnumWrappers.PlayerDigType.STOP_DESTROY_BLOCK) {
             this.diggingPlayers.remove(playerId);
-        }
-    }
-
-    private void handleCombatAttackPacket(PacketEvent event) {
-        EnumWrappers.EntityUseAction action = event.getPacket().getEntityUseActions().readSafely(0);
-        if (action != EnumWrappers.EntityUseAction.ATTACK) return;
-
-        Entity target = event.getPacket().getEntityModifier(event).readSafely(0);
-        if (target instanceof Player) {
-            this.cpsManager.recordCombatAttack(
-                    event.getPlayer().getUniqueId(), target.getUniqueId());
         }
     }
 

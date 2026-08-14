@@ -127,11 +127,7 @@ public class ProfileListener implements Listener {
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
 
-        if (profile.getState() == ProfileState.LOBBY
-                || validateTournament(profile)
-                || profile.getState() == ProfileState.EDITING
-                || profile.getState() == ProfileState.SPECTATING
-                || profile.getState() == ProfileState.WAITING) {
+        if (isProtectedLobbyState(profile)) {
             if (player.getGameMode() == GameMode.CREATIVE) return;
             event.setCancelled(true);
 
@@ -279,5 +275,15 @@ public class ProfileListener implements Listener {
         return tournament != null &&
                 profile.getState().equals(ProfileState.TOURNAMENT_LOBBY) &&
                 (tournament.getState() == TournamentState.STARTING || tournament.getState() == TournamentState.WAITING);
+    }
+
+    private boolean isProtectedLobbyState(Profile profile) {
+        return profile != null && (profile.getState() == ProfileState.LOBBY
+                || profile.getState() == ProfileState.EDITING
+                || profile.getState() == ProfileState.SPECTATING
+                || profile.getState() == ProfileState.WAITING
+                || validateTournament(profile)
+                || (profile.getState() == ProfileState.PLAYING_EVENT
+                && profile.getMatch() == null));
     }
 }

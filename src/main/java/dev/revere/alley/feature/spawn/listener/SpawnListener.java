@@ -5,6 +5,7 @@ import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.enums.ProfileState;
 import dev.revere.alley.feature.tournament.model.Tournament;
+import dev.revere.alley.library.menu.Menu;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -46,7 +47,7 @@ public class SpawnListener implements Listener {
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
 
-        if (profile.getState().equals(ProfileState.LOBBY) || validateTournament(profile) || profile.getState().equals(ProfileState.EDITING) || profile.getState().equals(ProfileState.WAITING)) {
+        if (isProtectedBlockState(profile)) {
             if (player.getGameMode() == GameMode.CREATIVE) {
                 return;
             }
@@ -89,7 +90,7 @@ public class SpawnListener implements Listener {
         Player player = event.getPlayer();
         ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
         Profile profile = profileService.getProfile(player.getUniqueId());
-        if (profile.getState().equals(ProfileState.LOBBY) || validateTournament(profile) || profile.getState().equals(ProfileState.EDITING) || profile.getState().equals(ProfileState.WAITING)) {
+        if (isProtectedBlockState(profile)) {
             if (player.getGameMode() == GameMode.CREATIVE) {
                 return;
             }
@@ -120,6 +121,16 @@ public class SpawnListener implements Listener {
             Player player = (Player) event.getWhoClicked();
             ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
             Profile profile = profileService.getProfile(player.getUniqueId());
+
+            // Menu clicks (incl. shift-clicks) are handled by the MenuListener (HIGHEST, ignoreCancelled).
+            // Cancelling them here would swallow every shift-click button (delete confirms, etc.).
+            // 菜单点击（包括shift点击）由MenuListener处理（HIGHEST优先级，ignoreCancelled）。
+            // 如果在这里取消，所有shift点击按钮（删除确认等）都会失效。
+            if (Menu.currentlyOpenedMenus.containsKey(player.getName())
+                    && event.getClickedInventory() != null
+                    && event.getClickedInventory() != player.getInventory()) {
+                return;
+            }
 
             if (profile.getState() == ProfileState.EDITING) {
                 return;
@@ -174,6 +185,20 @@ public class SpawnListener implements Listener {
                 || profile.getState() == ProfileState.WAITING
                 || profile.getState() == ProfileState.EDITING
                 || profile.getState() == ProfileState.SPECTATING
-                || validateTournament(profile));
+                || validateTournament(profile)
+                // Event participants stay in PLAYING_EVENT while queued in the
+                // lobby. Once their event match begins, Match assigns a context
+                // and normal kit-specific block rules take over.
+                || (profile.getState() == ProfileState.PLAYING_EVENT
+                && profile.getMatch() == null));
+    }
+
+    private boolean isProtectedBlockState(Profile profile) {
+        return profile != null && (profile.getState() == ProfileState.LOBBY
+                || profile.getState() == ProfileState.WAITING
+                || profile.getState() == ProfileState.EDITING
+                || validateTournament(profile)
+                || (profile.getState() == ProfileState.PLAYING_EVENT
+                && profile.getMatch() == null));
     }
 }

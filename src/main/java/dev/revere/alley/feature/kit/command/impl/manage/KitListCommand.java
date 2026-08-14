@@ -9,11 +9,8 @@ import org.bukkit.command.CommandSender;
 
 /**
  * @author Emmy
- * 作者: Emmy
  * @project Alley
- * 项目: Alley
  * @date 28/04/2024 - 22:07
- * 日期: 28/04/2024 - 22:07
  */
 public class KitListCommand extends BaseCommand {
     @CommandData(

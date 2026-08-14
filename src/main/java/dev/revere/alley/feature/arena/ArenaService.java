@@ -65,6 +65,16 @@ public interface ArenaService extends Service {
     Arena getRandomArena(Kit kit);
 
     /**
+     * Returns whether an enabled, dedicated SkyWars arena has been configured for the kit.
+     */
+    boolean hasSkyWarsArena(Kit kit);
+
+    /**
+     * Selects a dedicated SkyWars arena and creates its temporary copy.
+     */
+    Arena getRandomSkyWarsArena(Kit kit);
+
+    /**
      * Saves an arena's data to the configuration file.
      * 将竞技场数据保存到配置文件中。
      *

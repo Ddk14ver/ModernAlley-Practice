@@ -9,6 +9,7 @@ import dev.revere.alley.feature.match.snapshot.menu.button.SnapshotDataButton;
 import dev.revere.alley.feature.match.snapshot.menu.button.SnapshotOpponentButton;
 import dev.revere.alley.feature.match.snapshot.menu.button.items.SnapshotArmorButton;
 import dev.revere.alley.feature.match.snapshot.menu.button.items.SnapshotInventoryButton;
+import dev.revere.alley.feature.match.snapshot.menu.button.items.SnapshotOffhandButton;
 import dev.revere.alley.common.text.Symbol;
 import lombok.AllArgsConstructor;
 import org.bukkit.Material;
@@ -94,6 +95,9 @@ public class SnapshotMenu extends Menu {
         for (int i = 0; i < armorSlots.size(); i++) {
             buttons.put(armorSlots.get(i), new SnapshotArmorButton(this.snapshot, i));
         }
+        // Offhand item shown at the far right of the armor row.
+        // 副手物品显示在盔甲栏那一行的最右边。
+        buttons.put(config.getInt(path + ".armor.offhand-slot", 44), new SnapshotOffhandButton(this.snapshot));
     }
 
     /**
@@ -111,12 +115,12 @@ public class SnapshotMenu extends Menu {
         buttons.put(51, new SnapshotDataButton(
                 config.getString(path + ".hits.name").replace("{hits}", String.valueOf(this.snapshot.getTotalHits())),
 
-                getHitsLore(config, path).stream().map(line -> line
+                config.getStringList(path + ".hits.lore").stream().map(line -> line
                         .replaceAll("\\{critical_hits}", String.valueOf(this.snapshot.getCriticalHits()))
                         .replaceAll("\\{blocked_hits}", String.valueOf(this.snapshot.getBlockedHits()))
                         .replaceAll("\\{longest_combo}", String.valueOf(this.snapshot.getLongestCombo()))
-                        .replaceAll("\\{w_taps}", String.valueOf(this.snapshot.getWTaps()))
-                        .replaceAll("\\{average_combat_cps}", String.format(Locale.US, "%.2f", this.snapshot.getAverageCombatCps()))
+                        .replaceAll("\\{regen}", String.valueOf((int) Math.round(this.snapshot.getRegen())))
+                        .replaceAll("\\{w_taps}", String.valueOf(this.snapshot.getWTapPercentage()))
                         .replaceAll("\\{highest_combat_cps}", String.valueOf(this.snapshot.getHighestCombatCps()))
                 ).collect(Collectors.toList()),
 
@@ -124,34 +128,6 @@ public class SnapshotMenu extends Menu {
                 config.getInt(path + ".hits.durability", 0),
                 1
         ));
-    }
-
-    private List<String> getHitsLore(FileConfiguration config, String path) {
-        List<String> lore = new ArrayList<>(config.getStringList(path + ".hits.lore"));
-        String averageCombatCpsLine = lore.stream()
-                .filter(line -> line.contains("{average_combat_cps}"))
-                .findFirst()
-                .orElse(" &fAverage CPS: &6{average_combat_cps}");
-        String highestCombatCpsLine = lore.stream()
-                .filter(line -> line.contains("{highest_combat_cps}"))
-                .findFirst()
-                .orElse(" &fHighest CPS: &6{highest_combat_cps}");
-        lore.removeIf(line -> line.contains("%alley_player-max-cps%"));
-        lore.removeIf(line -> line.contains("{average_combat_cps}")
-                || line.contains("{highest_combat_cps}"));
-        boolean hasCriticalHits = lore.stream().anyMatch(line -> line.contains("{critical_hits}"));
-        boolean hasBlockedHits = lore.stream().anyMatch(line -> line.contains("{blocked_hits}"));
-
-        int insertIndex = 0;
-        if (!hasCriticalHits) {
-            lore.add(insertIndex++, " &fCritical: &6{critical_hits}");
-        }
-        if (!hasBlockedHits) {
-            lore.add(insertIndex, " &fBlocked: &6{blocked_hits}");
-        }
-        lore.add(averageCombatCpsLine);
-        lore.add(highestCombatCpsLine);
-        return lore;
     }
 
     /**

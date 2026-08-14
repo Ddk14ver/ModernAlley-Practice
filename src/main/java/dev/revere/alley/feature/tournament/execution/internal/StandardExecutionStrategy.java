@@ -400,7 +400,12 @@ public class StandardExecutionStrategy implements TournamentExecutionStrategy {
                     AlleyPlugin.getInstance().getService(dev.revere.alley.core.profile.ProfileService.class);
             collectParticipantUUIDs(winner).forEach(uuid -> {
                 dev.revere.alley.core.profile.Profile p = profileService.getProfile(uuid);
-                if (p != null) p.getProfileData().setTournamentWins(p.getProfileData().getTournamentWins() + 1);
+                if (p != null) {
+                    p.getProfileData().setTournamentWins(p.getProfileData().getTournamentWins() + 1);
+                    // Count the tournament win toward the kit's division progression.
+                    // 将锦标赛胜场计入该套件的段位进度。
+                    p.getProfileData().incrementTournamentKitWins(tournament.getKit().getName());
+                }
             });
             for (TournamentParticipant eliminated : ended.getPlacementList()) {
                 collectParticipantUUIDs(eliminated).forEach(uuid -> {

@@ -10,8 +10,10 @@ import dev.revere.alley.feature.cosmetic.CosmeticService;
 import dev.revere.alley.feature.cosmetic.internal.repository.SuitRepository;
 import dev.revere.alley.feature.cosmetic.internal.repository.impl.suit.BaseSuit;
 import dev.revere.alley.feature.cosmetic.model.CosmeticType;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import lombok.experimental.UtilityClass;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
@@ -45,7 +47,7 @@ public class PlayerUtil {
         player.setFallDistance(0.0F);
         player.setFoodLevel(20);
         player.setFireTicks(0);
-        player.setMaximumNoDamageTicks(20);
+        AlleyPlugin.getInstance().getService(KnockbackManager.class).resetHitDelayState(player);
 
         if (canFly(player)) {
             player.setAllowFlight(true);
@@ -60,7 +62,17 @@ public class PlayerUtil {
         player.setGameMode(GameMode.SURVIVAL);
 
         player.getInventory().setArmorContents(new ItemStack[4]);
-        player.getInventory().setContents(new ItemStack[36]);
+
+        // Clear the main inventory while keeping the Play Again paper handed out at
+        // match result, so it survives the return-to-lobby wipe.
+        // 清空主物品栏时保留对局结果阶段发放的"再来一局"纸，使其在返回大厅时不被清除。
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            if (!isPlayAgainPaper(contents[i])) {
+                contents[i] = null;
+            }
+        }
+        player.getInventory().setContents(contents);
 
         // Remove potion effects using modern API
         // 使用现代API移除药水效果
@@ -81,6 +93,18 @@ public class PlayerUtil {
         if (closeInventory) {
             player.closeInventory();
         }
+    }
+
+    /**
+     * Checks whether the given item is the Play Again paper handed out at match result.
+     * Matches the name check used by PlayAgainListener (color-stripped equals).
+     * 判断物品是否为对局结果阶段发放的"再来一局"纸（与PlayAgainListener的名称判定一致）。
+     */
+    private boolean isPlayAgainPaper(ItemStack item) {
+        if (item == null || item.getType() != Material.PAPER || !item.hasItemMeta()) return false;
+        String displayName = item.getItemMeta().getDisplayName();
+        if (displayName == null) return false;
+        return "Play Again".equals(ChatColor.stripColor(displayName));
     }
 
     /**

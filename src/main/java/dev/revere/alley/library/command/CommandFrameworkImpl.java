@@ -30,7 +30,7 @@ import java.util.*;
 
 @Getter
 @Service(provides = CommandFramework.class, priority = 40)
-public class CommandFrameworkImpl implements CommandFramework, CommandExecutor {
+public class CommandFrameworkImpl implements CommandFramework, CommandExecutor, TabCompleter {
     private final Map<String, Map.Entry<Method, Object>> commandMap = new HashMap<>();
     private final Map<String, Command> registeredBukkitCommands = new HashMap<>();
     private final Map<String, Map<UUID, Long>> cooldowns = new HashMap<>();
@@ -91,7 +91,131 @@ public class CommandFrameworkImpl implements CommandFramework, CommandExecutor {
             }
         }
 
+        applyCommandPermissions();
         registerHelp();
+    }
+
+    /**
+     * Applies permission-based visibility to registered commands.
+     * 为已注册的命令应用基于权限的可见性。
+     * Commands whose entire top-level label is admin-gated (or permission-gated)
+     * get their permission set on the underlying Bukkit command, so Bukkit hides
+     * them from tab completion, /help and execution for players lacking it.
+     * 如果某个顶层标签下的所有指令路径都受管理权限（或特定权限）限制，
+     * 则将该权限设置到对应的 Bukkit 命令上，使 Bukkit 在 tab 补全、/help 和
+     * 执行时对没有权限的玩家自动隐藏这些指令。
+     * Mixed labels (e.g. "ffa" which has player sub-commands) are left untouched.
+     * 混合标签（例如含有玩家子指令的 "ffa"）保持不变。
+     */
+    private void applyCommandPermissions() {
+        String adminPermission = this.pluginConstant.getAdminPermissionPrefix();
+        Map<String, Set<String>> permissionsByLabel = new HashMap<>();
+
+        for (Map.Entry<String, Map.Entry<Method, Object>> entry : this.commandMap.entrySet()) {
+            String label = entry.getKey();
+            if (label.contains(":")) {
+                continue;
+            }
+
+            String topLevel = label.split("\\.")[0];
+            CommandData commandData = entry.getValue().getKey().getAnnotation(CommandData.class);
+            if (commandData == null) {
+                continue;
+            }
+
+            String effectivePermission;
+            if (commandData.isAdminOnly()) {
+                effectivePermission = adminPermission;
+            } else if (!commandData.permission().isEmpty()) {
+                effectivePermission = commandData.permission();
+            } else {
+                effectivePermission = null;
+            }
+
+            permissionsByLabel.computeIfAbsent(topLevel, k -> new HashSet<>()).add(effectivePermission);
+        }
+
+        for (Map.Entry<String, Set<String>> entry : permissionsByLabel.entrySet()) {
+            Set<String> permissions = entry.getValue();
+            if (permissions.size() != 1 || permissions.contains(null)) {
+                continue;
+            }
+
+            Command command = this.registeredBukkitCommands.get(entry.getKey());
+            if (command != null) {
+                command.setPermission(permissions.iterator().next());
+            }
+        }
+    }
+
+    /**
+     * Generic fallback tab completion used when no explicit completer is registered
+     * for the current command path. It suggests registered sub-commands of the
+     * current path, filtered by the sender's permissions.
+     * 当当前指令路径没有注册显式补全器时使用的通用兜底补全。
+     * 它建议当前路径下已注册的二级指令，并按发送者的权限过滤。
+     * Returns null when no sub-command matches, letting Bukkit complete online player names.
+     * 当没有匹配的二级指令时返回 null，让 Bukkit 补全在线玩家名。
+     */
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length == 0) {
+            return null;
+        }
+
+        StringBuilder pathBuilder = new StringBuilder(label.toLowerCase());
+        for (int i = 0; i < args.length - 1; i++) {
+            if (!args[i].isEmpty() && !args[i].equals(" ")) {
+                pathBuilder.append('.').append(args[i].toLowerCase());
+            }
+        }
+        String basePath = pathBuilder.toString();
+        String partial = args[args.length - 1].toLowerCase();
+
+        Set<String> completions = new LinkedHashSet<>();
+        boolean hasChildren = false;
+        for (String key : this.commandMap.keySet()) {
+            if (key.contains(":")) {
+                continue;
+            }
+            if (!key.startsWith(basePath + ".")) {
+                continue;
+            }
+
+            String child = key.substring(basePath.length() + 1);
+            if (child.contains(".")) {
+                continue;
+            }
+            hasChildren = true;
+            if (!child.toLowerCase().startsWith(partial)) {
+                continue;
+            }
+
+            CommandData commandData = this.commandMap.get(key).getKey().getAnnotation(CommandData.class);
+            if (commandData != null && !canUseCommand(sender, commandData)) {
+                continue;
+            }
+            completions.add(child);
+        }
+
+        if (!hasChildren) {
+            return null;
+        }
+        return new ArrayList<>(completions);
+    }
+
+    /**
+     * Checks whether the sender is permitted to use a command.
+     * 检查发送者是否有权限使用某条指令。
+     */
+    private boolean canUseCommand(CommandSender sender, CommandData commandData) {
+        if (commandData.isAdminOnly() && !sender.hasPermission(this.pluginConstant.getAdminPermissionPrefix())) {
+            return false;
+        }
+        if (!commandData.permission().isEmpty() && !sender.hasPermission(commandData.permission())) {
+            return false;
+        }
+        return true;
     }
 
     @Override

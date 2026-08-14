@@ -105,6 +105,8 @@ public class ArenaCommand extends BaseCommand {
                     " &6│ &6/arena removekit &8(&7arenaName&8) &8(&7kitName&8) &7| Remove arena kit"
             },
             {
+                    " &6│ &6/arena test &7| Test the arena you are standing in",
+                    " &6│ &6/arena paste &8(&7schematicName&8) &7| Paste an arena schematic",
                     " &f│ &6/arena save &8(&7arenaName&8) &7| Save an arena",
                     " &6│ &6/arena saveall &7| Save all arenas"
             },

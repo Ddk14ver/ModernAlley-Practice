@@ -14,11 +14,8 @@ import java.util.List;
 
 /**
  * @author Emmy
- * 作者 Emmy
  * @project Alley
- * 项目 Alley
  * @since 16/06/2025
- * 自 2025年6月16日起
  */
 public class MatchResetBlocksCommand extends BaseCommand {
     @CommandData(

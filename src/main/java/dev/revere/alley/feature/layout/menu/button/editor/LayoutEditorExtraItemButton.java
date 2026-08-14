@@ -8,8 +8,10 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Map;
-
 /**
+ * @author Ddk1 ds4pro
+ * @project Alley
+ * @since 13/07/2026
  * Adds a configured optional item to the layout currently being edited.
  */
 @AllArgsConstructor

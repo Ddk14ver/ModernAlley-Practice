@@ -10,11 +10,8 @@ import java.util.*;
 
 /**
  * @author Remi
- * 作者 Remi
  * @project Alley
- * 项目 Alley
  * @date 6/1/2024
- * 日期 6/1/2024
  */
 @Getter
 public abstract class BaseCosmeticRepository<T extends BaseCosmetic> implements CosmeticRepository<T> {

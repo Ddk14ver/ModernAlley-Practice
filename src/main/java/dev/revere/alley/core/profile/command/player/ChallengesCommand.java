@@ -1,8 +1,8 @@
 package dev.revere.alley.core.profile.command.player;
 
-import dev.revere.alley.common.constants.MessageConstant;
 import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
 import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.feature.challenge.menu.ChallengeMenu;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 public class ChallengesCommand extends BaseCommand {
     @CommandData(
             name = "challenges",
+            aliases = {"challenge"},
             usage = "challenges",
             description = "View your challenges."
     )
@@ -31,6 +32,6 @@ public class ChallengesCommand extends BaseCommand {
             return;
         }
 
-        player.sendMessage(MessageConstant.IN_DEVELOPMENT);
+        new ChallengeMenu(profile).openMenu(player);
     }
 }

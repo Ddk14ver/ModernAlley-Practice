@@ -3,11 +3,10 @@ package dev.revere.alley.feature.match.internal.types;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.common.ListenerUtil;
 import dev.revere.alley.common.PlayerUtil;
-import dev.revere.alley.common.reflect.ReflectionService;
-import dev.revere.alley.common.reflect.internal.types.TitleReflectionServiceImpl;
 import dev.revere.alley.common.text.CC;
 import dev.revere.alley.core.config.ConfigService;
 import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.feature.arena.Arena;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingDropItemsImpl;
@@ -16,6 +15,8 @@ import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.TeamGameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.snapshot.Snapshot;
+import dev.revere.alley.feature.match.utility.MatchUtility;
+import dev.revere.alley.feature.match.utility.MatchResultFlight;
 import dev.revere.alley.feature.queue.Queue;
 import lombok.Getter;
 import net.md_5.bungee.api.chat.ClickEvent;
@@ -71,7 +72,7 @@ public class FFAMatch extends Match {
         super.setupPlayer(player);
 
         Location spawn = this.getArena().getPos1();
-        player.teleport(spawn);
+        player.teleportAsync(spawn);
     }
 
     @Override
@@ -83,7 +84,7 @@ public class FFAMatch extends Match {
 
     @Override
     public void handleRespawn(Player player) {
-        player.spigot().respawn();
+        if (player.isDead()) player.spigot().respawn();
         PlayerUtil.reset(player, false, true);
     }
 
@@ -130,10 +131,13 @@ public class FFAMatch extends Match {
 
     @Override
     public void handleDeath(Player player, EntityDamageEvent.DamageCause cause) {
-        AlleyPlugin.getInstance().getService(ReflectionService.class).getReflectionService(TitleReflectionServiceImpl.class).sendTitle(
+        if (this.deferToPrimaryThread(() -> this.handleDeath(player, cause))) return;
+
+        this.sendResultTitle(
                 player,
                 "&c&lDEFEAT!",
-                "&fYou have been eliminated!"
+                "&fYou have been eliminated!",
+                10, 20, 20
         );
         super.handleDeath(player, cause);
     }
@@ -146,15 +150,19 @@ public class FFAMatch extends Match {
 
     @Override
     public void handleRoundEnd() {
+        if (this.deferToPrimaryThread(this::handleRoundEnd)) return;
+
         setWinningParticipant();
+        applyResultFlightPreferences();
         broadcastFFAMatchOutcome();
 
         if (this.winningParticipant != null) {
             MatchGamePlayer winner = this.winningParticipant.getLeader();
-            AlleyPlugin.getInstance().getService(ReflectionService.class).getReflectionService(TitleReflectionServiceImpl.class).sendTitle(
+            this.sendResultTitle(
                     winner.getTeamPlayer(),
                     "&a&lVICTORY!",
-                    "&fYou are the last player standing!"
+                    "&fYou are the last player standing!",
+                    10, 20, 20
             );
         }
 
@@ -162,7 +170,30 @@ public class FFAMatch extends Match {
             this.broadcastAndStopSpectating();
         }
 
+        MatchUtility.sendPlayAgain(this);
+        this.announceMVP(40L);
         super.handleRoundEnd();
+    }
+
+    private void applyResultFlightPreferences() {
+        ProfileService profileService = AlleyPlugin.getInstance().getService(ProfileService.class);
+        this.participants.forEach(participant -> {
+            boolean won = participant == this.winningParticipant;
+            participant.getAllPlayers().forEach(gamePlayer -> {
+                Profile profile = profileService.getProfile(gamePlayer.getUuid());
+                if (profile == null) {
+                    return;
+                }
+
+                boolean enabled = won
+                        ? profile.getProfileData().getSettingData().isFlyOnWin()
+                        : profile.getProfileData().getSettingData().isFlyOnLoss();
+                Player player = gamePlayer.getTeamPlayer();
+                if (enabled && player != null) {
+                    MatchResultFlight.enable(player);
+                }
+            });
+        });
     }
 
     @Override

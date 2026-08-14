@@ -14,11 +14,8 @@ import java.util.Map;
 
 /**
  * @author Remi
- *         雷米
  * @project Alley
- *         Alley 项目
  * @date 6/1/2024
- *         2024年6月1日
  */
 @Getter
 @Service(provides = CosmeticService.class, priority = 140)

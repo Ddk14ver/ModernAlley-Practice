@@ -8,6 +8,8 @@ import dev.revere.alley.common.time.TimeUtil;
 import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.VisualsLocaleImpl;
 import dev.revere.alley.core.locale.internal.impl.message.GlobalMessagesLocaleImpl;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
 import lombok.Data;
 import org.bukkit.entity.Player;
 
@@ -79,7 +81,9 @@ public class QueueProfile {
             if (player != null) {
                 if (localeService.getBoolean(GlobalMessagesLocaleImpl.QUEUE_PROGRESSING_UNRANKED_BOOLEAN)) {
                     List<String> lines = localeService.getStringList(GlobalMessagesLocaleImpl.QUEUE_PROGRESSING_UNRANKED);
-                    lines.replaceAll(line -> line.replace("{kit}", this.queue.getKit().getDisplayName()));
+                    lines.replaceAll(line -> line
+                            .replace("{kit}", this.queue.getKit().getDisplayName())
+                            .replace("{ping-range}", getPingRangeDisplay(player)));
                     lines.forEach(line -> player.sendMessage(CC.translate(line)));
                 }
             }
@@ -100,7 +104,8 @@ public class QueueProfile {
                         for (String line : localeService.getStringList(GlobalMessagesLocaleImpl.QUEUE_PROGRESSING_RANKED_LIMIT_REACHED)) {
                             line = line.replace("{kit}", this.queue.getKit().getDisplayName())
                                     .replace("{min-elo}", String.valueOf(this.getMinimumElo()))
-                                    .replace("{max-elo}", String.valueOf(this.getMaximumElo()));
+                                    .replace("{max-elo}", String.valueOf(this.getMaximumElo()))
+                                    .replace("{ping-range}", getPingRangeDisplay(player));
                             player.sendMessage(CC.translate(line));
                         }
                     }
@@ -109,7 +114,8 @@ public class QueueProfile {
                         for (String line : localeService.getStringList(GlobalMessagesLocaleImpl.QUEUE_PROGRESSING_RANKED)) {
                             line = line.replace("{kit}", this.queue.getKit().getDisplayName())
                                     .replace("{min-elo}", String.valueOf(this.getMinimumElo()))
-                                    .replace("{max-elo}", String.valueOf(this.getMaximumElo()));
+                                    .replace("{max-elo}", String.valueOf(this.getMaximumElo()))
+                                    .replace("{ping-range}", getPingRangeDisplay(player));
                             player.sendMessage(CC.translate(line));
                         }
                     }
@@ -151,5 +157,11 @@ public class QueueProfile {
      */
     public long getElapsedTime() {
         return System.currentTimeMillis() - this.startTime;
+    }
+
+    private String getPingRangeDisplay(Player player) {
+        Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
+        int pingRange = profile.getProfileData().getSettingData().getQueuePingRange();
+        return pingRange <= 0 ? "Disabled" : "+/-" + pingRange + "ms";
     }
 }

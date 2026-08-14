@@ -6,10 +6,12 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 /**
@@ -40,7 +42,9 @@ public final class ResourcePackBuilder {
     }
 
     public static final String PACK_FILE_NAME = "alley_mvp_music.zip";
-    private static final int PACK_FORMAT = 34; // Minecraft 1.21+
+    private static final int PACK_FORMAT = 75; // Minecraft 1.21.11
+    private static final int PACK_REVISION = 6;
+    private static final String REVISION_ENTRY = "alley-pack-revision.txt";
 
     private ResourcePackBuilder() {}
 
@@ -67,8 +71,10 @@ public final class ResourcePackBuilder {
             return;
         }
 
-        // Skip if pack already exists (delete the file to force regeneration)
-        if (Files.exists(packFile)) {
+        // Rebuild old packs when protocol features add assets. This is needed
+        // for existing installations where the original music-only zip is
+        // already present in the plugin data folder.
+        if (Files.exists(packFile) && isCurrentRevision(packFile)) {
             plugin.getLogger().info("[Alley] MVP music resource pack already exists: " + packFile);
             return;
         }
@@ -114,10 +120,25 @@ public final class ResourcePackBuilder {
                 writePackMcmeta(zos);
                 zos.closeEntry();
 
+                zos.putNextEntry(new ZipEntry(REVISION_ENTRY));
+                zos.write(Integer.toString(PACK_REVISION).getBytes(StandardCharsets.UTF_8));
+                zos.closeEntry();
+
                 // --- sounds.json ---
                 zos.putNextEntry(new ZipEntry("assets/minecraft/sounds.json"));
                 writeSoundsJson(zos);
                 zos.closeEntry();
+
+                // END_GATEWAY has an empty collision shape and a full-cube
+                // outline, making it ideal for the AutoClick input probe. Its
+                // portal shader always writes alpha=1, so a transparent texture
+                // alone cannot hide it. The replacement is the vanilla 1.21.11
+                // shader with one guarded branch that discards only the
+                // PORTAL_LAYERS=16 End Gateway pipeline. The probe's initial
+                // beam is suppressed per player with block-entity data instead
+                // of replacing the global End Gateway beam texture.
+                writeTextEntry(zos, "assets/minecraft/shaders/core/rendertype_end_portal.fsh",
+                        endPortalShader());
 
                 // --- .ogg files ---
                 for (Map.Entry<String, String> entry : SONGS.entrySet()) {
@@ -135,15 +156,15 @@ public final class ResourcePackBuilder {
                     }
                 }
             }
-            Files.move(tmpFile, packFile);
+            Files.move(tmpFile, packFile, StandardCopyOption.REPLACE_EXISTING);
         } finally {
             try { Files.deleteIfExists(tmpFile); } catch (IOException ignored) {}
         }
     }
 
     private static void writePackMcmeta(ZipOutputStream zos) throws IOException {
-        String json = "{\"pack\":{\"pack_format\":" + PACK_FORMAT
-                + ",\"description\":\"Alley MVP Music\"}}";
+        String json = "{\"pack\":{\"description\":\"Alley resources\",\"min_format\":"
+                + PACK_FORMAT + ",\"max_format\":" + PACK_FORMAT + "}}";
         zos.write(json.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -161,5 +182,98 @@ public final class ResourcePackBuilder {
         }
         sb.append("}");
         zos.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean isCurrentRevision(Path packFile) {
+        try (ZipFile zip = new ZipFile(packFile.toFile())) {
+            ZipEntry entry = zip.getEntry(REVISION_ENTRY);
+            if (entry == null) return false;
+            try (InputStream in = zip.getInputStream(entry)) {
+                String value = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+                return Integer.toString(PACK_REVISION).equals(value);
+            }
+        } catch (IOException exception) {
+            return false;
+        }
+    }
+
+    private static void writeTextEntry(ZipOutputStream zos, String path, String content) throws IOException {
+        zos.putNextEntry(new ZipEntry(path));
+        zos.write(content.getBytes(StandardCharsets.UTF_8));
+        zos.closeEntry();
+    }
+
+    /**
+     * Keep real End Portals visible while making only the End Gateway pipeline
+     * discard its fragments. Minecraft 1.21.11 defines PORTAL_LAYERS as 15 for
+     * End Portals and 16 for End Gateways when compiling this shared shader.
+     */
+    private static String endPortalShader() {
+        return """
+                #version 330
+
+                #moj_import <minecraft:fog.glsl>
+                #moj_import <minecraft:matrix.glsl>
+                #moj_import <minecraft:globals.glsl>
+
+                uniform sampler2D Sampler0;
+                uniform sampler2D Sampler1;
+
+                in vec4 texProj0;
+                in float sphericalVertexDistance;
+                in float cylindricalVertexDistance;
+
+                const vec3[] COLORS = vec3[](
+                    vec3(0.022087, 0.098399, 0.110818),
+                    vec3(0.011892, 0.095924, 0.089485),
+                    vec3(0.027636, 0.101689, 0.100326),
+                    vec3(0.046564, 0.109883, 0.114838),
+                    vec3(0.064901, 0.117696, 0.097189),
+                    vec3(0.063761, 0.086895, 0.123646),
+                    vec3(0.084817, 0.111994, 0.166380),
+                    vec3(0.097489, 0.154120, 0.091064),
+                    vec3(0.106152, 0.131144, 0.195191),
+                    vec3(0.097721, 0.110188, 0.187229),
+                    vec3(0.133516, 0.138278, 0.148582),
+                    vec3(0.070006, 0.243332, 0.235792),
+                    vec3(0.196766, 0.142899, 0.214696),
+                    vec3(0.047281, 0.315338, 0.321970),
+                    vec3(0.204675, 0.390010, 0.302066),
+                    vec3(0.080955, 0.314821, 0.661491)
+                );
+                const mat4 SCALE_TRANSLATE = mat4(
+                    0.5, 0.0, 0.0, 0.25,
+                    0.0, 0.5, 0.0, 0.25,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0
+                );
+
+                mat4 end_portal_layer(float layer) {
+                    mat4 translate = mat4(
+                        1.0, 0.0, 0.0, 17.0 / layer,
+                        0.0, 1.0, 0.0, (2.0 + layer / 1.5) * (GameTime * 1.5),
+                        0.0, 0.0, 1.0, 0.0,
+                        0.0, 0.0, 0.0, 1.0
+                    );
+                    mat2 rotate = mat2_rotate_z(radians((layer * layer * 4321.0 + layer * 9.0) * 2.0));
+                    mat2 scale = mat2((4.5 - layer / 4.0) * 2.0);
+                    return mat4(scale * rotate) * translate * SCALE_TRANSLATE;
+                }
+
+                out vec4 fragColor;
+
+                void main() {
+                #if PORTAL_LAYERS == 16
+                        discard;
+                #else
+                    vec3 color = textureProj(Sampler0, texProj0).rgb * COLORS[0];
+                    for (int i = 0; i < PORTAL_LAYERS; i++) {
+                        color += textureProj(Sampler1, texProj0 * end_portal_layer(float(i + 1))).rgb * COLORS[i];
+                    }
+                    fragColor = apply_fog(vec4(color, 1.0), sphericalVertexDistance, cylindricalVertexDistance,
+                        FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);
+                #endif
+                }
+                """;
     }
 }

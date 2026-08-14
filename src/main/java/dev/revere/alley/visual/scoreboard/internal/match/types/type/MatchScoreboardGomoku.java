@@ -10,6 +10,7 @@ import dev.revere.alley.feature.match.internal.types.GomokuPlayable;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.visual.scoreboard.internal.match.BaseMatchScoreboard;
+import dev.revere.alley.visual.scoreboard.internal.match.MatchScoreboardSettings;
 import dev.revere.alley.visual.scoreboard.internal.match.annotation.ScoreboardData;
 import org.bukkit.entity.Player;
 
@@ -50,7 +51,7 @@ public class MatchScoreboardGomoku extends BaseMatchScoreboard {
 
         List<String> lines = new ArrayList<>(template.size());
         for (String line : template) {
-            if (line.isEmpty()) continue;
+            if (line.isEmpty() || !MatchScoreboardSettings.shouldDisplay(profile, line)) continue;
             String normalized = line.equals("&6&lGomoku") ? "&6&lɢᴏᴍᴏᴋᴜ" : line;
             lines.add(replacePlaceholders(normalized, profile, player, you, opponent));
         }

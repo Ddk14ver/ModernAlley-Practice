@@ -6,6 +6,7 @@ import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.bootstrap.AlleyContext;
 import dev.revere.alley.bootstrap.annotation.Service;
 import dev.revere.alley.core.database.MongoService;
+import dev.revere.alley.core.config.ConfigService;
 import dev.revere.alley.feature.leaderboard.LeaderboardService;
 import dev.revere.alley.feature.leaderboard.data.LeaderboardPlayerData;
 import dev.revere.alley.feature.leaderboard.LeaderboardType;
@@ -21,12 +22,17 @@ import lombok.Getter;
 import org.bson.Document;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitTask;
 
+import java.time.DateTimeException;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -43,29 +49,47 @@ public class LeaderboardServiceImpl implements LeaderboardService {
     private final MongoService mongoService;
     private final KitService kitService;
     private final ProfileService profileService;
+    private final ConfigService configService;
     private final ExecutorService executorService;
 
     private final Map<Kit, List<LeaderboardRecord>> leaderboardCache = new ConcurrentHashMap<>();
     private final Map<String, Integer> onlinePlayerCache = new ConcurrentHashMap<>();
+    private final AtomicBoolean recalculating = new AtomicBoolean();
+    private volatile ZoneId monthlyZoneId = ZoneId.systemDefault();
+    private volatile String cachedMonthKey = "";
+    private BukkitTask updateTask;
 
     /**
      * Constructor for DI.
      * 依赖注入构造方法。
      */
-    public LeaderboardServiceImpl(MongoService mongoService, KitService kitService, ProfileService profileService) {
+    public LeaderboardServiceImpl(MongoService mongoService, KitService kitService, ProfileService profileService,
+                                  ConfigService configService) {
         this.mongoService = mongoService;
         this.kitService = kitService;
         this.profileService = profileService;
+        this.configService = configService;
         this.executorService = Executors.newFixedThreadPool(4);
     }
 
     @Override
     public void initialize(AlleyContext context) {
+        this.monthlyZoneId = resolveMonthlyZoneId();
         this.forceRecalculateAll();
+
+        long refreshMinutes = Math.max(1L,
+                this.configService.getSettingsConfig().getLong("leaderboards.database-refresh-minutes", 5L));
+        long refreshTicks = refreshMinutes * 60L * 20L;
+        this.updateTask = new LeaderboardUpdateTask(this)
+                .runTaskTimerAsynchronously(context.getPlugin(), refreshTicks, refreshTicks);
     }
 
     @Override
     public void shutdown(AlleyContext context) {
+        if (this.updateTask != null) {
+            this.updateTask.cancel();
+            this.updateTask = null;
+        }
         if (executorService != null && !executorService.isShutdown()) {
             executorService.shutdown();
             Logger.info("Leaderboard executor service has been shut down.");
@@ -74,10 +98,35 @@ public class LeaderboardServiceImpl implements LeaderboardService {
 
     @Override
     public void forceRecalculateAll() {
-        MongoCollection<Document> profileCollection = this.mongoService.getMongoDatabase().getCollection("profiles");
+        if (!this.recalculating.compareAndSet(false, true)) return;
 
-        CompletableFuture.allOf(this.kitService.getKits().stream()
-                .map(kit -> CompletableFuture.runAsync(() -> calculateLeaderboardForKit(kit, profileCollection), executorService)).toArray(CompletableFuture[]::new)).join();
+        this.monthlyZoneId = resolveMonthlyZoneId();
+        MongoCollection<Document> profileCollection = this.mongoService.getMongoDatabase().getCollection("profiles");
+        String calculationMonthKey = currentMonthKey();
+        try {
+            CompletableFuture<?>[] calculations = this.kitService.getKits().stream()
+                    .map(kit -> CompletableFuture.runAsync(
+                            () -> calculateLeaderboardForKit(kit, profileCollection), executorService))
+                    .toArray(CompletableFuture[]::new);
+
+            // Do not join here: initialize() and the admin reload menu can call
+            // this method on the server thread, while every calculation performs
+            // synchronous MongoDB I/O. Publish the cache when all workers finish.
+            CompletableFuture.allOf(calculations).whenComplete((ignored, throwable) -> {
+                try {
+                    if (throwable == null) {
+                        this.cachedMonthKey = calculationMonthKey;
+                    } else {
+                        Logger.error("Leaderboard recalculation failed: " + throwable.getMessage());
+                    }
+                } finally {
+                    this.recalculating.set(false);
+                }
+            });
+        } catch (RuntimeException exception) {
+            this.recalculating.set(false);
+            throw exception;
+        }
     }
 
     private void calculateLeaderboardForKit(Kit kit, MongoCollection<Document> profileCollection) {
@@ -155,6 +204,27 @@ public class LeaderboardServiceImpl implements LeaderboardService {
                                         .append("input", "$profileData.unrankedKitData")))),
                         0
                 ));
+            case UNRANKED_MONTHLY:
+                Document monthlyKitData = new Document("$getField", new Document()
+                        .append("field", kitName)
+                        .append("input", "$profileData.unrankedKitData"));
+                Document monthlyPeriod = new Document("$ifNull", Arrays.asList(
+                        new Document("$getField", new Document()
+                                .append("field", "monthlyPeriodKey")
+                                .append("input", monthlyKitData)),
+                        ""
+                ));
+                Document monthlyWins = new Document("$ifNull", Arrays.asList(
+                        new Document("$getField", new Document()
+                                .append("field", "monthlyWins")
+                                .append("input", monthlyKitData)),
+                        0
+                ));
+                return new Document("$cond", Arrays.asList(
+                        new Document("$eq", Arrays.asList(monthlyPeriod, currentMonthKey())),
+                        monthlyWins,
+                        0
+                ));
             case FFA:
                 return new Document("$ifNull", Arrays.asList(
                         new Document("$getField", new Document()
@@ -180,6 +250,9 @@ public class LeaderboardServiceImpl implements LeaderboardService {
 
     @Override
     public List<LeaderboardPlayerData> getLeaderboardEntries(Kit kit, LeaderboardType type) {
+        if (type == LeaderboardType.UNRANKED_MONTHLY && !currentMonthKey().equals(this.cachedMonthKey)) {
+            invalidateExpiredMonthlyCache();
+        }
         this.refreshOnlinePlayersOptimized(kit, type);
 
         return this.leaderboardCache.getOrDefault(kit, Collections.emptyList())
@@ -218,12 +291,17 @@ public class LeaderboardServiceImpl implements LeaderboardService {
             }
         }
 
+        if (type != LeaderboardType.RANKED) {
+            leaderboard.removeIf(playerData -> playerData.getValue() <= 0);
+        }
+
         Set<UUID> leaderboardUuids = leaderboard.stream()
                 .map(LeaderboardPlayerData::getUuid)
                 .collect(Collectors.toSet());
 
         for (Map.Entry<UUID, Integer> entry : onlinePlayerUpdates.entrySet()) {
-            if (!leaderboardUuids.contains(entry.getKey())) {
+            if (!leaderboardUuids.contains(entry.getKey())
+                    && (entry.getValue() > 0 || type == LeaderboardType.RANKED)) {
                 Player player = Bukkit.getPlayer(entry.getKey());
                 if (player != null) {
                     leaderboard.add(new LeaderboardPlayerData(player.getName(), entry.getKey(), kit, entry.getValue()));
@@ -241,6 +319,9 @@ public class LeaderboardServiceImpl implements LeaderboardService {
                 return data.getRankedKitData().getOrDefault(kit.getName(), new ProfileRankedKitData()).getElo();
             case UNRANKED:
                 return data.getUnrankedKitData().getOrDefault(kit.getName(), new ProfileUnrankedKitData()).getWins();
+            case UNRANKED_MONTHLY:
+                return data.getUnrankedKitData().getOrDefault(kit.getName(), new ProfileUnrankedKitData())
+                        .getMonthlyWins(currentMonthKey());
             case FFA:
                 return data.getFfaData().getOrDefault(kit.getName(), new ProfileFFAData()).getKills();
             case WIN_STREAK:
@@ -248,6 +329,42 @@ public class LeaderboardServiceImpl implements LeaderboardService {
             default:
                 return 0;
         }
+    }
+
+    @Override
+    public void recordMonthlyUnrankedWin(Profile profile, Kit kit) {
+        if (profile == null || kit == null || profile.getProfileData() == null) return;
+        ProfileUnrankedKitData kitData = profile.getProfileData().getUnrankedKitData().get(kit.getName());
+        if (kitData != null) {
+            kitData.incrementMonthlyWins(currentMonthKey());
+        }
+    }
+
+    private ZoneId resolveMonthlyZoneId() {
+        String fallback = ZoneId.systemDefault().getId();
+        String configured = this.configService.getSettingsConfig()
+                .getString("leaderboards.timezone", fallback);
+        try {
+            return ZoneId.of(configured == null || configured.isBlank() ? fallback : configured);
+        } catch (DateTimeException exception) {
+            Logger.warn("Invalid leaderboard timezone '" + configured + "'; using " + fallback + ".");
+            return ZoneId.systemDefault();
+        }
+    }
+
+    private String currentMonthKey() {
+        return YearMonth.now(this.monthlyZoneId).toString();
+    }
+
+    private synchronized void invalidateExpiredMonthlyCache() {
+        String currentKey = currentMonthKey();
+        if (currentKey.equals(this.cachedMonthKey)) return;
+
+        this.cachedMonthKey = currentKey;
+        this.leaderboardCache.values().forEach(records -> records.stream()
+                .filter(record -> record.getType() == LeaderboardType.UNRANKED_MONTHLY)
+                .forEach(record -> record.getParticipants().clear()));
+        forceRecalculateAll();
     }
 
     public void shutdown() {

@@ -55,7 +55,7 @@ public class CheckpointMatch extends DefaultMatch {
             checkpoint = this.getParticipantA().containsPlayer(player.getUniqueId()) ? getArena().getPos1() : getArena().getPos2();
         }
 
-        player.teleport(checkpoint);
+        player.teleportAsync(checkpoint);
 
         this.giveLoadout(player, this.getKit());
         this.applyColorKit(player);

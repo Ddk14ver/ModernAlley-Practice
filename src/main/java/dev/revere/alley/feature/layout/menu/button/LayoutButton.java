@@ -13,7 +13,7 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.inventory.ItemStack;
 
 /**
- * @author Ddk1 ClaudeCode
+ * @author Ddk1 5.6terra
  * @project Alley
  * @since 13/07/2026
  */

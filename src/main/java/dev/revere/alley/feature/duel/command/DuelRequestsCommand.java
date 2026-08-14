@@ -11,11 +11,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Emmy
- * 作者：Emmy
  * @project Alley
- * 项目：Alley
  * @date 22/10/2024 - 18:19
- * 日期：2024年10月22日 - 18:19
  */
 public class DuelRequestsCommand extends BaseCommand {
     @CommandData(

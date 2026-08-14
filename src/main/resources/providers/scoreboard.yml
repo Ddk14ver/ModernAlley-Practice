@@ -151,7 +151,7 @@ scoreboard:
       - "&6&l{queued-type} ǫᴜᴇᴜᴇ"
       - "&6&l│ &rKit: &6{queued-kit}"
       - "&6&l│ &rDuration: &6{queued-time}"
-      - "&6&l│ &rPing Range: &6N/A"
+      - "&6&l│ &rPing Range: &6{queue-ping-range}"
       - ""
       - "&fꜱᴇᴀʀᴄʜɪɴɢ ꜰᴏʀ ᴍᴀᴛᴄʜ{dot-animation}"
     bot-match:

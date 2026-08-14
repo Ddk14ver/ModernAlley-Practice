@@ -207,11 +207,17 @@ public class HotbarServiceImpl implements HotbarService {
 
     @Override
     public void applyHotbarItems(Player player, HotbarType type) {
-        // Preserve the staff member's manually arranged inventory.
-        if (AlleyPlugin.getInstance().getService(dev.revere.alley.feature.staff.StaffModeManager.class).isStaff(player)) {
+        // Queue inventory is authoritative even for staff; outside a queue,
+        // preserve the staff member's manually arranged inventory as before.
+        if (type != HotbarType.QUEUE && AlleyPlugin.getInstance()
+                .getService(dev.revere.alley.feature.staff.StaffModeManager.class).isStaff(player)) {
             return;
         }
-        // Clear main inventory (slots 0-35)
+        // Hotbar application is authoritative: clear every slot. The Play Again paper
+        // is only protected while the player is still in the arena (PlayerUtil.reset),
+        // so lobby-style hotbars can overwrite it once the player has returned.
+        // 应用hotbar即全量清空。纸张仅在玩家仍处于竞技场时受到保护（PlayerUtil.reset），
+        // 返回大厅后即可被大厅hotbar覆盖。
         for (int i = 0; i < 36; i++) {
             player.getInventory().setItem(i, null);
         }
@@ -220,6 +226,8 @@ public class HotbarServiceImpl implements HotbarService {
         player.getInventory().setChestplate(null);
         player.getInventory().setLeggings(null);
         player.getInventory().setBoots(null);
+        // Clear offhand — missed by the 0-35 loop above.
+        player.getInventory().setItemInOffHand(null);
         if (type != HotbarType.PARTY) {
             Profile prof = profileService.getProfile(player.getUniqueId());
             if (prof != null) {

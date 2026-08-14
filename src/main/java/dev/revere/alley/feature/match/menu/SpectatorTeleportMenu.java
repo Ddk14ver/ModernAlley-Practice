@@ -79,7 +79,7 @@ public class SpectatorTeleportMenu extends PaginatedMenu {
         @Override
         public ItemStack getButtonItem(Player player) {
             Profile profile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(this.gamePlayer.getUuid());
-            DefaultMatch match = (DefaultMatch) profile.getMatch();
+            Match match = profile.getMatch();
 
             List<String> lore = new ArrayList<>();
             List<String> configLore = this.config.getStringList(this.path + ".buttons.spectator-teleport-button.lore");
@@ -90,8 +90,12 @@ public class SpectatorTeleportMenu extends PaginatedMenu {
             }
 
             int ping = ReflectionUtility.getPing(this.gamePlayer.getTeamPlayer());
-            ChatColor team = match.getTeamColor(match.getParticipant(this.gamePlayer.getTeamPlayer()));
-            String teamColor = team.name();
+            String teamName = ChatColor.WHITE + "FFA";
+            if (match instanceof DefaultMatch defaultMatch) {
+                ChatColor teamColor = defaultMatch.getTeamColor(
+                        defaultMatch.getParticipant(this.gamePlayer.getTeamPlayer()));
+                teamName = teamColor + teamColor.name();
+            }
             int elo = match.isRanked() ? profile.getProfileData().getRankedKitData().get(match.getKit().getName()).getElo() : -1;
 
             for (String line : configLore) {
@@ -99,7 +103,7 @@ public class SpectatorTeleportMenu extends PaginatedMenu {
                         .replace("{player-color}", String.valueOf(profile.getNameColor()))
                         .replace("{username}", this.gamePlayer.getUsername())
                         .replace("{ping}", String.valueOf(ping))
-                        .replace("{team}", team + teamColor)
+                        .replace("{team}", teamName)
                         .replace("{elo}", String.valueOf(elo))
                 );
             }

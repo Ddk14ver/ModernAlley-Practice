@@ -2,6 +2,7 @@ package dev.revere.alley.feature.leaderboard;
 
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.bootstrap.lifecycle.Service;
+import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.feature.leaderboard.data.LeaderboardPlayerData;
 
 import java.util.List;
@@ -31,6 +32,8 @@ public interface LeaderboardService extends Service {
      *         已排序的 LeaderboardPlayerData 列表
      */
     List<LeaderboardPlayerData> getLeaderboardEntries(Kit kit, LeaderboardType type);
+
+    void recordMonthlyUnrankedWin(Profile profile, Kit kit);
 
     /**
      * Triggers a full, deep recalculation of all leaderboards from the database.

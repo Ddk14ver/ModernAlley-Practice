@@ -8,6 +8,7 @@ import dev.revere.alley.feature.kit.setting.KitSetting;
 import dev.revere.alley.feature.kit.setting.KitSettingService;
 import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldHitDelay;
 import dev.revere.alley.feature.kit.setting.types.mechanic.KitSettingPearlCooldownImpl;
+import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.library.command.BaseCommand;
 import dev.revere.alley.library.command.CommandArgs;
 import dev.revere.alley.library.command.annotation.CommandData;
@@ -15,11 +16,8 @@ import org.bukkit.entity.Player;
 
 /**
  * @author Remi
- * 作者: Remi
  * @project Alley
- * 项目: Alley
  * @date 5/21/2024
- * 日期: 5/21/2024
  */
 public class KitSetSettingCommand extends BaseCommand {
     @CommandData(
@@ -27,7 +25,7 @@ public class KitSetSettingCommand extends BaseCommand {
             aliases = {"kit.setting"},
             isAdminOnly = true,
             usage = "kit setsetting <kit> <setting> <true/false|value>",
-            description = "Set a kit setting. PearlCooldown uses seconds; 0 disables it."
+            description = "Set a kit setting. oldHitDelay follows the kit's knockback profile."
     )
     @Override
     public void onCommand(CommandArgs command) {
@@ -59,6 +57,22 @@ public class KitSetSettingCommand extends BaseCommand {
         }
 
         if (target instanceof KitSettingOldHitDelay || target instanceof KitSettingPearlCooldownImpl) {
+            if (target instanceof KitSettingOldHitDelay
+                    && (args[2].equalsIgnoreCase("true") || args[2].equalsIgnoreCase("false"))) {
+                boolean enabled = Boolean.parseBoolean(args[2]);
+                target.setEnabled(enabled);
+                if (enabled) {
+                    this.plugin.getService(KnockbackManager.class).synchronizeKitHitDelay(kit);
+                }
+                this.plugin.getService(KitService.class).saveKit(kit);
+                player.sendMessage(CC.translate(enabled
+                        ? "&aEnabled oldHitDelay for &6" + kit.getName()
+                                + "&a and synchronized it to the profile value &6" + target.getValue() + "&a."
+                        : "&aDisabled oldHitDelay for &6" + kit.getName()
+                                + "&a; this kit will use the fixed window &6"
+                                + KitSettingOldHitDelay.DEFAULT_DELAY + " &a(about 10 server ticks)."));
+                return;
+            }
             try {
                 int value = Integer.parseInt(args[2]);
                 if (value < 0) {
@@ -67,9 +81,18 @@ public class KitSetSettingCommand extends BaseCommand {
                 }
                 target.setValue(value);
                 target.setEnabled(target instanceof KitSettingOldHitDelay || value > 0);
+                boolean synchronizedToProfile = target instanceof KitSettingOldHitDelay
+                        && this.plugin.getService(KnockbackManager.class).synchronizeKitHitDelay(kit);
                 this.plugin.getService(KitService.class).saveKit(kit);
-                String unit = target instanceof KitSettingPearlCooldownImpl ? " seconds" : " ticks";
-                player.sendMessage(CC.translate("&aSet " + settingName + " to &6" + value + unit + " &afor kit &6" + kit.getName() + "&a."));
+                String unit = target instanceof KitSettingPearlCooldownImpl
+                        ? " seconds" : " NMS-window units";
+                if (synchronizedToProfile) {
+                    player.sendMessage(CC.translate("&cThe requested oldHitDelay &6" + value
+                            + " &cdid not match the profile. The kit was synchronized to &6"
+                            + target.getValue() + "&c."));
+                } else {
+                    player.sendMessage(CC.translate("&aSet " + settingName + " to &6" + value + unit + " &afor kit &6" + kit.getName() + "&a."));
+                }
             } catch (NumberFormatException e) {
                 player.sendMessage(CC.translate("&cInvalid number: " + args[2] + "."));
             }

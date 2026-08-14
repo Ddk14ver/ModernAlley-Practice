@@ -11,13 +11,12 @@ menus:
       hits:
         name: "&6&lHits: {hits}"
         lore:
-          - " &fCritical: &6{critical_hits}"
-          - " &fBlocked: &6{blocked_hits}"
+          - " &fCritical: &6{critical_hits} &7| &fBlocked: &6{blocked_hits}"
           - " &fBest Combo: &6{longest_combo}"
           - ""
           - "&6&lPlayer"
-          - " &fW-Taps: &6{w_taps}"
-          - " &fAverage CPS: &6{average_combat_cps}"
+          - " &fRegen: &6{regen} {heart}"
+          - " &fW-Tap: &6{w_taps}%"
           - " &fHighest CPS: &6{highest_combat_cps}"
         item: "DIAMOND_SWORD"
         durability: 0
@@ -26,7 +25,7 @@ menus:
         lore:
           - " &fRemaining: &6{potions_remaining}"
           - " &fThrown: &6{potions_thrown}"
-          - " &fWasted: &6{potions_wasted}{heart}"
+          - " &fWasted: &6{potions_wasted} {heart}"
           - " &fMissed: &6{potions_missed}"
           - " &fAccuracy: &6{potion_accuracy}%"
         item: "POTION"
@@ -57,6 +56,7 @@ menus:
         slot: 53
       armor:
         slots: [ 36, 37, 38, 39 ]
+        offhand-slot: 44
   spectator-teleport:
     title: "&6&lSpectator Menu"
     buttons:

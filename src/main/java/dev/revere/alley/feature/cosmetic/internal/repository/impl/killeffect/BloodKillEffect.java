@@ -11,11 +11,8 @@ import org.bukkit.inventory.ItemStack;
 
 /**
  * @author Remi
- *   作者: Remi
  * @project Alley
- *   项目: Alley
  * @date 01/06/2024
- *   日期: 01/06/2024
  */
 @CosmeticData(type = CosmeticType.KILL_EFFECT, name = "Blood", description = "Spawn blood particles", permission = "blood", icon = Material.REDSTONE, slot = 12)
 public class BloodKillEffect extends BaseKillEffect {

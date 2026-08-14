@@ -7,6 +7,7 @@ import dev.revere.alley.feature.match.model.internal.MatchGamePlayer;
 import dev.revere.alley.feature.match.model.GameParticipant;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.visual.scoreboard.internal.match.MatchScoreboard;
+import dev.revere.alley.visual.scoreboard.internal.match.MatchScoreboardSettings;
 import dev.revere.alley.common.text.CC;
 import org.bukkit.entity.Player;
 
@@ -28,6 +29,9 @@ public class MatchScoreboardEndingImpl implements MatchScoreboard {
         if (match == null) return scoreboardLines;
 
         for (String line : configService.getScoreboardConfig().getStringList("scoreboard.lines.ending")) {
+            if (!MatchScoreboardSettings.shouldDisplay(profile, line)) {
+                continue;
+            }
             scoreboardLines.add(CC.translate(line)
                     .replace("{opponent}", opponent.getLeader().getUsername())
                     .replace("{duration}", match.getDuration())

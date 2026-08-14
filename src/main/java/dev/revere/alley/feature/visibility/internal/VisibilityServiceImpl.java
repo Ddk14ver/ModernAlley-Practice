@@ -173,7 +173,11 @@ public class VisibilityServiceImpl implements VisibilityService {
     private void handleSpectatingCase(Player viewer, Player target, Profile viewerProfile) {
         Profile targetProfile = this.profileService.getProfile(target.getUniqueId());
         if (targetProfile.getState() == ProfileState.SPECTATING) {
-            viewer.showPlayer(target);
+            if (viewerProfile.getProfileData().getSettingData().isHideOtherSpectators()) {
+                viewer.hidePlayer(target);
+            } else {
+                viewer.showPlayer(target);
+            }
             return;
         }
 
