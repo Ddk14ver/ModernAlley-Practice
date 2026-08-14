@@ -47,11 +47,17 @@ import dev.revere.alley.feature.party.PartyService;
 import dev.revere.alley.feature.spawn.SpawnService;
 import dev.revere.alley.feature.visibility.VisibilityService;
 import dev.revere.alley.library.assemble.AssembleService;
+import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.Consumable;
+import io.papermc.paper.datacomponent.item.FoodProperties;
+import io.papermc.paper.datacomponent.item.consumable.ItemUseAnimation;
 import lombok.Getter;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
@@ -60,6 +66,7 @@ import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.profile.PlayerProfile;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.RayTraceResult;
@@ -84,6 +91,7 @@ public final class BotMatchSession {
     private static final int HEAL_ACTION_TIMEOUT_TICKS = 20;
     private static final int GOLDEN_APPLE_USE_TICKS = 32;
     private static final int BUFF_POTION_USE_TICKS = 32;
+    private static final long W_TAP_RELEASE_NANOS = 80_000_000L;
     private static final int BOW_CHARGE_TICKS = 18;
     private static final int BOW_USE_DURATION_TICKS = 72_000;
     private static final int BLOCK_AIM_TICKS = 2;
@@ -109,6 +117,7 @@ public final class BotMatchSession {
     private final int timeLimitTicks;
     private final int returnDelayTicks;
     private final boolean debug;
+    private final PlayerProfile botSkinProfile;
     private final Map<Location, BlockState> changedBlocks = new LinkedHashMap<>();
     private final List<Projectile> spawnedProjectiles = new java.util.ArrayList<>();
 
@@ -151,6 +160,8 @@ public final class BotMatchSession {
     private int goldenAppleSlot = -1;
     private int goldenAppleFinishTick;
     private int nextGoldenAppleTick;
+    private int foodSlot = -1;
+    private int foodFinishTick;
     private int bowSlot = -1;
     private int bowReleaseTick;
     private ItemStack chargingBow;
@@ -159,13 +170,16 @@ public final class BotMatchSession {
     private ItemStack healingPotion;
     private Vector healingEscapeDirection;
     private double attackProgress;
+    private long wTapReleaseUntilNanos;
+    private boolean pausedForOpponent;
     private int attackAttemptSequence;
     private int acceptedAttackSequence;
     private float originalWalkSpeed;
     private double strafeDirection = 1.0D;
 
     public BotMatchSession(BotServiceImpl service, Player player, Kit kit, Arena arena,
-                           BotDifficultyProfile difficulty, FileConfiguration config) {
+                           BotDifficultyProfile difficulty, FileConfiguration config,
+                           PlayerProfile botSkinProfile) {
         this.service = service;
         this.player = player;
         this.kit = kit;
@@ -176,6 +190,7 @@ public final class BotMatchSession {
         this.timeLimitTicks = Math.max(30, config.getInt("match-time-limit-seconds", 300)) * 20;
         this.returnDelayTicks = Math.max(0, config.getInt("return-to-lobby-delay-seconds", 3)) * 20;
         this.debug = config.getBoolean("debug", false);
+        this.botSkinProfile = botSkinProfile;
     }
 
     public boolean start() {
@@ -225,9 +240,10 @@ public final class BotMatchSession {
         Profile humanProfile = AlleyPlugin.getInstance().getService(ProfileService.class).getProfile(player.getUniqueId());
         AlleyPlugin.getInstance().getService(MusicService.class).stopMusic(player);
 
-        String botName = "Bot_" + difficulty.getId();
+        String botName = difficulty.getId().equalsIgnoreCase("custom")
+                ? difficulty.getDisplayName() : "Bot_" + difficulty.getId();
         if (botName.length() > 16) botName = botName.substring(0, 16);
-        this.nativeBot = NativeBotPlayer.spawn(arena.getPos2(), botName, difficulty.getPing());
+        this.nativeBot = NativeBotPlayer.spawn(arena.getPos2(), botName, difficulty.getPing(), this.botSkinProfile);
         this.bot = nativeBot.player();
         this.bot.addScoreboardTag(BOT_ENTITY_TAG);
 
@@ -319,10 +335,12 @@ public final class BotMatchSession {
         bot.setHealth(bot.getMaxHealth());
         bot.setFoodLevel(20);
         bot.setSaturation(5.0F);
+        bot.setExhaustion(0.0F);
         bot.setGameMode(GameMode.SURVIVAL);
         bot.setInvulnerable(false);
         bot.setNoDamageTicks(0);
         bot.setWalkSpeed(0.2F);
+        applyBotMovementSpeed();
         bot.setSprinting(true);
         this.matchContext.applyColorKit(bot);
         selectCombatItem();
@@ -426,6 +444,8 @@ public final class BotMatchSession {
             return;
         }
 
+        if (pauseForOpponent()) return;
+
         if (this.goldenAppleSlot >= 0) {
             tickGoldenAppleUse();
             return;
@@ -450,12 +470,19 @@ public final class BotMatchSession {
         } else if (this.ticks >= this.nextBuffPotionCheckTick) {
             if (beginBuffPotionUse()) return;
         }
+        if (this.foodSlot >= 0) {
+            tickFoodUse();
+            return;
+        }
         if (this.aiMode == BotAiMode.POTPVP) {
             if (tryHeal()) return;
+        }
+        if (this.aiMode == BotAiMode.BUILDUHC && tryExtinguishFire()) return;
+        if (beginFoodUse()) return;
+        if (this.aiMode == BotAiMode.POTPVP) {
             if (tryDebuffPotion()) return;
         }
         if (this.aiMode == BotAiMode.BUILDUHC) {
-            if (tryExtinguishFire()) return;
             if (tryBuildUhcAction()) return;
         }
         updateNavigation();
@@ -583,7 +610,7 @@ public final class BotMatchSession {
             this.buffPotionFinishTick = this.ticks + BUFF_POTION_USE_TICKS;
             this.buffPotionEffects = List.copyOf(effects);
             bot.setSprinting(false);
-            setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
+            setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
             startUsingHeldItem(BUFF_POTION_USE_TICKS);
             bot.updateInventory();
             return true;
@@ -599,7 +626,7 @@ public final class BotMatchSession {
         }
 
         bot.setSprinting(false);
-        setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
+        setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.buffPotionFinishTick) {
             keepUsingHeldItem(Math.min(BUFF_POTION_USE_TICKS,
                     this.buffPotionFinishTick - this.ticks + 1));
@@ -653,9 +680,72 @@ public final class BotMatchSession {
         };
     }
 
+    private boolean pauseForOpponent() {
+        boolean shouldPause = !difficulty.isTryhard()
+                && (service.isInventoryOpen(player) || isOpponentConsuming() || isOpponentFacingAway());
+        if (!shouldPause) {
+            if (this.pausedForOpponent) {
+                this.pausedForOpponent = false;
+                selectCombatItem();
+                restoreCombatNavigation();
+            }
+            return false;
+        }
+
+        if (!this.pausedForOpponent) {
+            this.pausedForOpponent = true;
+            interruptForOpponentPause();
+        }
+        bot.setSprinting(false);
+        nativeBot.clearMovementInput();
+        return true;
+    }
+
+    private boolean isOpponentConsuming() {
+        if (!player.hasActiveItem()) return false;
+        ItemStack activeItem = player.getActiveItem();
+        if (activeItem.isEmpty()) return false;
+
+        Consumable consumable = activeItem.getData(DataComponentTypes.CONSUMABLE);
+        if (consumable == null) return false;
+        return consumable.animation() == ItemUseAnimation.EAT
+                || consumable.animation() == ItemUseAnimation.DRINK;
+    }
+
+    private boolean isOpponentFacingAway() {
+        Vector look = player.getLocation().getDirection().setY(0.0D);
+        Vector towardBot = bot.getLocation().toVector()
+                .subtract(player.getLocation().toVector()).setY(0.0D);
+        if (look.lengthSquared() < 1.0E-8D || towardBot.lengthSquared() < 1.0E-8D) return false;
+        return look.normalize().dot(towardBot.normalize()) < 0.0D;
+    }
+
+    private void interruptForOpponentPause() {
+        if (this.goldenAppleSlot >= 0) finishGoldenAppleUse(false);
+        if (this.foodSlot >= 0) finishFoodUse(false);
+        if (this.buffPotionSlot >= 0) finishBuffPotionUse(false);
+        if (this.healingPotionSlot >= 0 || this.healingRecoveryTick > 0) cancelHealingAction();
+        if (this.bowSlot >= 0) finishBowCharge(false);
+        if (this.buildingSlot >= 0) clearBlockPlacement();
+        if (this.activeRodProjectile != null) {
+            if (this.activeRodProjectile.isValid()) this.activeRodProjectile.remove();
+            this.activeRodProjectile = null;
+        }
+        this.holdingRod = false;
+        this.rodWeaponReturnTick = 0;
+        this.attackProgress = 0.0D;
+        stopUsingHeldItem();
+        selectCombatItem();
+    }
+
     private void updateNavigation() {
         Location target = getAimTarget();
         faceTarget(target);
+        if (isWTapReleasing()) {
+            bot.setSprinting(false);
+            nativeBot.clearMovementInput();
+            return;
+        }
         bot.setSprinting(true);
         if (difficulty.isStrafe() && ticks % 16 == 0) strafeDirection *= -1.0D;
         double strafe = difficulty.isStrafe()
@@ -670,11 +760,16 @@ public final class BotMatchSession {
 
     private void restoreCombatNavigation() {
         if (nativeBot == null || !nativeBot.isSpawned()) return;
-        bot.setSprinting(true);
+        bot.setSprinting(!this.pausedForOpponent && !isWTapReleasing());
     }
 
     private double getCombatMovementSpeed() {
-        return difficulty.getMovementSpeed();
+        return 1.0D;
+    }
+
+    private void applyBotMovementSpeed() {
+        AttributeInstance movement = bot.getAttribute(Attribute.MOVEMENT_SPEED);
+        if (movement != null) movement.setBaseValue(0.1D * difficulty.getMovementSpeed());
     }
 
     private void tryAttack() {
@@ -717,12 +812,14 @@ public final class BotMatchSession {
 
     public void confirmBotAttack() {
         if (this.debug) this.acceptedAttackSequence = this.attackAttemptSequence;
-        if (!difficulty.isWTap() || ended || bot == null) return;
+        if (!difficulty.isWTap() || ended || bot == null || nativeBot == null) return;
+        this.wTapReleaseUntilNanos = System.nanoTime() + W_TAP_RELEASE_NANOS;
         bot.setSprinting(false);
         nativeBot.clearMovementInput();
-        Bukkit.getScheduler().runTaskLater(AlleyPlugin.getInstance(), () -> {
-            if (!ended && bot != null) bot.setSprinting(true);
-        }, 1L);
+    }
+
+    private boolean isWTapReleasing() {
+        return System.nanoTime() < this.wTapReleaseUntilNanos;
     }
 
     private void verifyAttackAttempt(int attempt, PlayerKnockbackData data) {
@@ -1171,6 +1268,7 @@ public final class BotMatchSession {
 
     private void interruptForPriorityHealing() {
         boolean restoreWeapon = this.buildingSlot >= 0 || this.holdingRod;
+        if (this.foodSlot >= 0) finishFoodUse(false);
         if (this.buffPotionSlot >= 0) finishBuffPotionUse(false);
         if (this.bowSlot >= 0) finishBowCharge(false);
         if (this.buildingSlot >= 0) clearBlockPlacement();
@@ -1211,6 +1309,64 @@ public final class BotMatchSession {
         return true;
     }
 
+    private boolean beginFoodUse() {
+        if (bot.getFoodLevel() >= 20) return false;
+
+        ItemStack[] contents = bot.getInventory().getStorageContents();
+        for (int slot = 0; slot < contents.length; slot++) {
+            ItemStack item = contents[slot];
+            if (!isOrdinaryFood(item)) continue;
+
+            Consumable consumable = item.getData(DataComponentTypes.CONSUMABLE);
+            int useTicks = Math.max(1, (int) (consumable.consumeSeconds() * 20.0F));
+            this.foodSlot = holdItem(slot);
+            this.foodFinishTick = this.ticks + useTicks;
+            bot.setSprinting(false);
+            setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
+            startUsingHeldItem(useTicks);
+            bot.updateInventory();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isOrdinaryFood(ItemStack item) {
+        if (item == null || item.isEmpty()
+                || item.getType() == Material.GOLDEN_APPLE
+                || item.getType() == Material.ENCHANTED_GOLDEN_APPLE) return false;
+
+        FoodProperties food = item.getData(DataComponentTypes.FOOD);
+        Consumable consumable = item.getData(DataComponentTypes.CONSUMABLE);
+        return food != null && consumable != null && consumable.animation() == ItemUseAnimation.EAT;
+    }
+
+    private void tickFoodUse() {
+        ItemStack heldItem = bot.getInventory().getItem(this.foodSlot);
+        if (!isOrdinaryFood(heldItem) || bot.getFoodLevel() >= 20) {
+            finishFoodUse(false);
+            return;
+        }
+
+        bot.setSprinting(false);
+        setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
+        if (this.ticks < this.foodFinishTick) {
+            keepUsingHeldItem(this.foodFinishTick - this.ticks + 1);
+            return;
+        }
+        finishFoodUse(true);
+    }
+
+    private void finishFoodUse(boolean completeUse) {
+        if (completeUse && bot.hasActiveItem()) bot.completeUsingActiveItem();
+        stopUsingHeldItem();
+        this.foodSlot = -1;
+        this.foodFinishTick = 0;
+        syncHeldItem();
+        bot.updateInventory();
+        selectCombatItem();
+        restoreCombatNavigation();
+    }
+
     private boolean placeTemporaryLava() {
         if (!canBuild()) return false;
         int lavaSlot = findSlot(Material.LAVA_BUCKET);
@@ -1243,7 +1399,7 @@ public final class BotMatchSession {
         this.nextBowTick = this.ticks + 20;
         this.nextRodTick = this.ticks + 20;
         bot.setSprinting(false);
-        setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
+        setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         startUsingHeldItem(GOLDEN_APPLE_USE_TICKS);
         bot.updateInventory();
         return true;
@@ -1257,7 +1413,7 @@ public final class BotMatchSession {
         }
 
         bot.setSprinting(false);
-        setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
+        setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.goldenAppleFinishTick) {
             keepUsingHeldItem(Math.min(GOLDEN_APPLE_USE_TICKS,
                     this.goldenAppleFinishTick - this.ticks + 1));
@@ -1309,7 +1465,7 @@ public final class BotMatchSession {
         this.bowReleaseTick = this.ticks + BOW_CHARGE_TICKS;
         this.chargingBow = bow == null ? null : bow.clone();
         bot.setSprinting(false);
-        setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
+        setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         startUsingHeldItem(BOW_USE_DURATION_TICKS);
         bot.updateInventory();
         return true;
@@ -1323,7 +1479,7 @@ public final class BotMatchSession {
         }
 
         bot.setSprinting(false);
-        setNavigationSpeed(difficulty.getMovementSpeed() * EATING_SPEED_MULTIPLIER);
+        setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         Location origin = bot.getEyeLocation();
         nativeBot.face(origin.clone().add(solveArrowVelocity(origin, getBowArrowSpeed())),
                 (float) difficulty.getAimSpeed());

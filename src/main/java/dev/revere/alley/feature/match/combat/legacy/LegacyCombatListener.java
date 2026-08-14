@@ -41,6 +41,7 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class LegacyCombatListener implements Listener {
 
+    private static final float LEGACY_ACTION_EXHAUSTION_SCALE = 2.0F / 3.0F;
     private static final EntityDamageEvent.DamageModifier[] PRE_ARMOUR_MODIFIERS = {
             EntityDamageEvent.DamageModifier.INVULNERABILITY_REDUCTION,
             EntityDamageEvent.DamageModifier.FREEZING,
@@ -628,14 +629,14 @@ public class LegacyCombatListener implements Listener {
         if (!(e.getEntity() instanceof Player player)) return;
         if (e.getExhaustionReason() == EntityExhaustionEvent.ExhaustionReason.ATTACK
                 && svc.hasSwordBlockKB(player.getUniqueId())) {
-            e.setExhaustion(0.3F);
+            e.setExhaustion(0.3F * LEGACY_ACTION_EXHAUSTION_SCALE);
             return;
         }
         if (!svc.hasOldFood(player.getUniqueId())) return;
         switch (e.getExhaustionReason()) {
             case REGEN -> e.setExhaustion(0.0F);
-            case JUMP -> e.setExhaustion(0.2F);
-            case JUMP_SPRINT -> e.setExhaustion(0.8F);
+            case JUMP -> e.setExhaustion(0.2F * LEGACY_ACTION_EXHAUSTION_SCALE);
+            case JUMP_SPRINT -> e.setExhaustion(0.8F * LEGACY_ACTION_EXHAUSTION_SCALE);
         }
     }
 

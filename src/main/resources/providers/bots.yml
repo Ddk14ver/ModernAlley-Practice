@@ -2,11 +2,12 @@ enabled: true
 # Logs the resolved Match/KB profile and every Bot knockback bridge application.
 debug: false
 countdown-seconds: 3
-match-time-limit-seconds: 300
+match-time-limit-seconds: 600
 return-to-lobby-delay-seconds: 3
 
 profiles:
-  # All difficulties use the normal player's full forward input and sprint speed.
+  # 1.0 is normal player movement speed; values above 1.0 are intentionally faster.
+  # tryhard: false pauses while the opponent is turned away, consuming, or using an inventory.
   easy:
     display-name: "&aEasy"
     icon: WOODEN_SWORD
@@ -18,6 +19,7 @@ profiles:
     aim-speed: 12.0
     aim-error: 0.32
     ping: 0
+    tryhard: false
     w-tap: false
     strafe: false
     bow: false
@@ -37,6 +39,7 @@ profiles:
     aim-speed: 18.0
     aim-error: 0.24
     ping: 0
+    tryhard: false
     w-tap: true
     strafe: true
     bow: true
@@ -56,6 +59,7 @@ profiles:
     aim-speed: 32.0
     aim-error: 0.16
     ping: 0
+    tryhard: true
     w-tap: true
     strafe: true
     bow: true
@@ -64,3 +68,23 @@ profiles:
     lava-ticks: 16
     antifire: true
     heal-health: 12.0
+  hacker:
+    display-name: "&4&lHacker"
+    icon: NETHER_STAR
+    cps: 20.0
+    maxreach: 4.5
+    swing-range: 8.0
+    minreach: 0.25
+    movement-speed: 1.35
+    aim-speed: 180.0
+    aim-error: 0.0
+    ping: 0
+    tryhard: true
+    w-tap: true
+    strafe: true
+    bow: true
+    rod: true
+    lava: true
+    lava-ticks: 16
+    antifire: true
+    heal-health: 14.0

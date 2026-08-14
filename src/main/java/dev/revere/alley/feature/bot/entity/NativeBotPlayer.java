@@ -1,16 +1,21 @@
 package dev.revere.alley.feature.bot.entity;
 
 import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
 import dev.revere.alley.AlleyPlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.profile.PlayerProfile;
+import org.bukkit.profile.PlayerTextures;
 import org.bukkit.util.Vector;
 
+import java.nio.charset.StandardCharsets;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Collection;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -88,6 +93,10 @@ public final class NativeBotPlayer {
     }
 
     public static NativeBotPlayer spawn(Location location, String name, int ping) {
+        return spawn(location, name, ping, null);
+    }
+
+    public static NativeBotPlayer spawn(Location location, String name, int ping, PlayerProfile skinProfile) {
         if (!isSupported()) throw new IllegalStateException(unsupportedReason());
         if (location.getWorld() == null) throw new IllegalArgumentException("Bot location has no world");
 
@@ -117,6 +126,7 @@ public final class NativeBotPlayer {
 
             String profileName = sanitizeName(name);
             GameProfile profile = new GameProfile(UUID.randomUUID(), profileName);
+            applySkin(profile, skinProfile);
             Constructor<?> playerConstructor = serverPlayerClass.getConstructor(
                     minecraftServerClass, serverLevelClass, GameProfile.class, clientInformationClass);
             handle = playerConstructor.newInstance(server, level, profile, clientInformation);
@@ -169,6 +179,16 @@ public final class NativeBotPlayer {
             drainSyntheticChannel(syntheticChannel);
             throw new IllegalStateException("Could not create native bot player", exception);
         }
+    }
+
+    private static void applySkin(GameProfile profile, PlayerProfile skinProfile) {
+        if (skinProfile == null || skinProfile.getTextures().getSkin() == null) return;
+        String metadata = skinProfile.getTextures().getSkinModel() == PlayerTextures.SkinModel.SLIM
+                ? ",\"metadata\":{\"model\":\"slim\"}" : "";
+        String json = "{\"textures\":{\"SKIN\":{\"url\":\""
+                + skinProfile.getTextures().getSkin() + "\"" + metadata + "}}}";
+        String value = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        profile.getProperties().put("textures", new Property("textures", value));
     }
 
     public static void remove(Player player) {

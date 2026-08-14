@@ -40,6 +40,7 @@ public class BotDifficultyMenu extends Menu {
             if (index >= preferredSlots.length) break;
             buttons.put(preferredSlots[index++], new BotDifficultyButton(kit, profile));
         }
+        buttons.put(40, new CustomBotButton(this.kit));
 
         this.addBorder(buttons, Material.BLACK_STAINED_GLASS_PANE, 5);
         return buttons;

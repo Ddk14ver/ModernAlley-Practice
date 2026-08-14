@@ -46,6 +46,7 @@ public class PlayerUtil {
         player.setSaturation(5.0F);
         player.setFallDistance(0.0F);
         player.setFoodLevel(20);
+        player.setExhaustion(0.0F);
         player.setFireTicks(0);
         AlleyPlugin.getInstance().getService(KnockbackManager.class).resetHitDelayState(player);
 

@@ -2,6 +2,7 @@ package dev.revere.alley.core.database.internal;
 
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.cosmetic.model.CosmeticType;
+import dev.revere.alley.feature.bot.CustomBotProfile;
 import dev.revere.alley.feature.division.Division;
 import dev.revere.alley.feature.division.DivisionService;
 import dev.revere.alley.feature.layout.data.LayoutData;
@@ -216,6 +217,7 @@ public class MongoUtility {
                 .putSafe("playTimeData", profileData::getPlayTimeData, MongoUtility::convertProfilePlayTimeData)
                 .putSafe("musicData", profileData::getMusicData, MongoUtility::convertProfileMusicData)
                 .putSafe("challengeData", profileData::getChallengeData, MongoUtility::convertProfileChallengeData)
+                .putSafe("customBotProfile", profileData::getCustomBotProfile, MongoUtility::convertCustomBotProfile)
                 .build();
     }
 
@@ -279,6 +281,8 @@ public class MongoUtility {
                 profileData::setMusicData, MongoUtility::createDefaultMusicData);
         parseAndSet(profileDataDocument, "challengeData", MongoUtility::parseProfileChallengeData,
                 profileData::setChallengeData, ProfileChallengeData::new);
+        parseAndSet(profileDataDocument, "customBotProfile", MongoUtility::parseCustomBotProfile,
+                profileData::setCustomBotProfile, CustomBotProfile::new);
 
         // Division progression now counts wins from every mode, so recompute the stored
         // division/tier from the combined win counts on load.
@@ -286,6 +290,61 @@ public class MongoUtility {
         profileData.refreshAllDivisions();
 
         return profileData;
+    }
+
+    public static Document convertCustomBotProfile(CustomBotProfile custom) {
+        if (custom == null) return new Document();
+        return new DocumentBuilder()
+                .put("name", safeString(custom.getName()))
+                .put("skinName", safeString(custom.getSkinName()))
+                .put("cps", custom.getCps())
+                .put("maxReach", custom.getMaxReach())
+                .put("swingRange", custom.getSwingRange())
+                .put("minReach", custom.getMinReach())
+                .put("movementSpeed", custom.getMovementSpeed())
+                .put("aimSpeed", custom.getAimSpeed())
+                .put("aimError", custom.getAimError())
+                .put("ping", custom.getPing())
+                .put("tryhard", custom.isTryhard())
+                .put("wTap", custom.isWTap())
+                .put("strafe", custom.isStrafe())
+                .put("bow", custom.isBow())
+                .put("rod", custom.isRod())
+                .put("lava", custom.isLava())
+                .put("lavaTicks", custom.getLavaTicks())
+                .put("antiFire", custom.isAntiFire())
+                .put("healHealth", custom.getHealHealth())
+                .build();
+    }
+
+    private static CustomBotProfile parseCustomBotProfile(Document document) {
+        CustomBotProfile custom = new CustomBotProfile();
+        if (document == null) return custom;
+        if (document.getString("name") != null) custom.setName(document.getString("name"));
+        if (document.getString("skinName") != null) custom.setSkinName(document.getString("skinName"));
+        custom.setCps(readDouble(document, "cps", custom.getCps()));
+        custom.setMaxReach(readDouble(document, "maxReach", custom.getMaxReach()));
+        custom.setSwingRange(readDouble(document, "swingRange", custom.getSwingRange()));
+        custom.setMinReach(readDouble(document, "minReach", custom.getMinReach()));
+        custom.setMovementSpeed(readDouble(document, "movementSpeed", custom.getMovementSpeed()));
+        custom.setAimSpeed(readDouble(document, "aimSpeed", custom.getAimSpeed()));
+        custom.setAimError(readDouble(document, "aimError", custom.getAimError()));
+        custom.setPing(document.getInteger("ping", custom.getPing()));
+        custom.setTryhard(document.getBoolean("tryhard", custom.isTryhard()));
+        custom.setWTap(document.getBoolean("wTap", custom.isWTap()));
+        custom.setStrafe(document.getBoolean("strafe", custom.isStrafe()));
+        custom.setBow(document.getBoolean("bow", custom.isBow()));
+        custom.setRod(document.getBoolean("rod", custom.isRod()));
+        custom.setLava(document.getBoolean("lava", custom.isLava()));
+        custom.setLavaTicks(document.getInteger("lavaTicks", custom.getLavaTicks()));
+        custom.setAntiFire(document.getBoolean("antiFire", custom.isAntiFire()));
+        custom.setHealHealth(readDouble(document, "healHealth", custom.getHealHealth()));
+        return custom;
+    }
+
+    private static double readDouble(Document document, String key, double fallback) {
+        Object value = document.get(key);
+        return value instanceof Number number ? number.doubleValue() : fallback;
     }
 
     /**

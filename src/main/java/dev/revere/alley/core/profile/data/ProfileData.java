@@ -10,6 +10,7 @@ import dev.revere.alley.feature.title.TitleService;
 import dev.revere.alley.feature.title.model.TitleRecord;
 import dev.revere.alley.feature.match.data.MatchData;
 import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.feature.bot.CustomBotProfile;
 import dev.revere.alley.core.profile.data.types.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -40,6 +41,7 @@ public class ProfileData {
     private ProfilePlayTimeData playTimeData;
     private ProfileMusicData musicData;
     private ProfileChallengeData challengeData;
+    private CustomBotProfile customBotProfile;
 
     private List<MatchData> previousMatches;
 
@@ -92,6 +94,7 @@ public class ProfileData {
         this.layoutData = new ProfileLayoutData();
         this.musicData = new ProfileMusicData();
         this.challengeData = new ProfileChallengeData();
+        this.customBotProfile = new CustomBotProfile();
     }
 
     private void feedDataClasses() {

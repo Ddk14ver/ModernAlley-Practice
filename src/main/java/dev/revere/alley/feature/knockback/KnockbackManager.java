@@ -35,6 +35,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
     private final Map<String, KnockbackProfile> profiles = new LinkedHashMap<>();
     private final Map<UUID, PlayerKnockbackData> playerData = new ConcurrentHashMap<>();
+    private HitDetection hitDetection;
     private MisplaceHandler misplaceHandler;
     private KnockbackListener knockbackListener;
     private PotionMotionListener potionMotionListener;
@@ -57,8 +58,9 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         this.knockbackListener = new KnockbackListener(this);
         AlleyPlugin.getInstance().getServer().getPluginManager()
                 .registerEvents(this.knockbackListener, AlleyPlugin.getInstance());
+        this.hitDetection = new HitDetection(this);
         AlleyPlugin.getInstance().getServer().getPluginManager()
-                .registerEvents(new HitDetection(this), AlleyPlugin.getInstance());
+                .registerEvents(this.hitDetection, AlleyPlugin.getInstance());
         this.potionMotionListener = new PotionMotionListener(this);
         AlleyPlugin.getInstance().getServer().getPluginManager()
                 .registerEvents(this.potionMotionListener, AlleyPlugin.getInstance());
@@ -70,12 +72,16 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         // Tick loop for packet delay queue
         AlleyPlugin.getInstance().getServer().getScheduler().runTaskTimer(AlleyPlugin.getInstance(), () -> {
             currentTick++;
+            if (hitDetection != null) hitDetection.tick();
             if (misplaceHandler != null) misplaceHandler.tick();
         }, 1L, 1L);
     }
 
     @Override
     public void shutdown(AlleyContext context) {
+        if (this.hitDetection != null) {
+            this.hitDetection.clear();
+        }
         if (this.misplaceHandler != null) {
             this.misplaceHandler.disable();
         }
@@ -245,6 +251,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
             data.setVelocity(null);
             data.clearLegacyState();
         }
+        if (hitDetection != null) hitDetection.clearPlayer(uuid);
         if (misplaceHandler != null) misplaceHandler.clearPlayer(uuid);
     }
 
@@ -263,6 +270,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         data.clearLegacyState();
         data.setVelocity(null);
         player.setNoDamageTicks(0);
+        if (hitDetection != null) hitDetection.clearPlayer(player.getUniqueId());
 
         if (data.getProfileName() == null) {
             // Do not let a match's hurt window leak into the lobby or next kit.
