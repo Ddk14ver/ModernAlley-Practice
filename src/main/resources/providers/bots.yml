@@ -30,7 +30,7 @@ profiles:
     display-name: "&eNormal"
     icon: IRON_SWORD
     cps: 10.0
-    maxreach: 2.8
+    maxreach: 2.5
     swing-range: 6.2
     minreach: 1.25
     movement-speed: 1.0
