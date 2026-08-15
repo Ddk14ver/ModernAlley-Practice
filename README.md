@@ -5,7 +5,7 @@
 
 (Actually the 1.8.8Alley is **No longer in development**.This is an Alley fork by Ddk1 and All new codes is unrelated to the original developer [Revere Group]. If you need to get in touch, please contact Ddk1.)
 
-**ModernAlley** is a fully custom, feature-rich 1.21.11 Practice PvP core that Modernized from the 1.8.8 Alley practice plugin, built for performance, flexibility, and competitive gameplay. It's modular, customizable, and designed to support server admins with powerful tools for match management, player control, and visuals.
+**ModernAlley** is a fully custom, feature-rich 1.21.11 Practice PvP core that Modernized from the 1.8.8 Alley practice plugin, built for performance, flexibility, and competitive gameplay. It's modular, customizable, and designed to support server admins with powerful tools for match management, player control, and visuals.**AND It has the ability to turn the legacy（1.8）combat mechanics back to 1.21.11**
 
 > ModernAlley is currently in **active development** and is **not** considered a final product.
 
