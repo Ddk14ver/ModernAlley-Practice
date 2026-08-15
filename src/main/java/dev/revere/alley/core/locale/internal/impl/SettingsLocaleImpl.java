@@ -58,7 +58,7 @@ public enum SettingsLocaleImpl implements LocaleEntry {
     PROFANITY_FILTER_STAFF_NOTIFICATION_FORMAT("settings.yml", "profanity-filter.staff-notification-format", "&6[S] &f(&6Alley: &fProfanity Detected) &c{player}&f: &7{message}"),
 
     SERVER_CHAT_FORMAT_ENABLED_BOOLEAN("settings.yml", "server.chat-format.global.enabled", true),
-    SERVER_CHAT_FORMAT_GLOBAL("settings.yml", "server.chat-format.global.format", "&7[{level}&7]&r {prefix}{rank-color}{name-color}{player}{suffix}{tag}{separator}{message}"),
+    SERVER_CHAT_FORMAT_GLOBAL("settings.yml", "server.chat-format.global.format", "{level-prefix}&r{prefix}{selected-title}{rank-color}{name-color}{player}{suffix}{tag}{separator}{message}"),
     SERVER_CHAT_FORMAT_TAG_APPEARANCE_FORMAT("settings.yml", "server.chat-format.tag-appearance.format", " {tag-color}{tag-prefix}"),
     SERVER_CHAT_FORMAT_SEPARATOR("settings.yml", "server.chat-format.global.separator", "&7: &f"),
 

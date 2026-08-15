@@ -106,6 +106,8 @@ public class ProfileSettingData {
     private boolean allowSpectators;
     private boolean disablePublicChatWhenInMatch;
     private boolean hideOtherSpectators;
+    private boolean swordBlockSoundsEnabled;
+    private boolean showChatLevelPrefix;
     private String chatChannel;
     private String time;
 
@@ -135,6 +137,8 @@ public class ProfileSettingData {
         this.allowSpectators = true;
         this.disablePublicChatWhenInMatch = false;
         this.hideOtherSpectators = false;
+        this.swordBlockSoundsEnabled = false;
+        this.showChatLevelPrefix = false;
         this.chatChannel = ChatChannel.GLOBAL.toString();
         this.time = WorldTime.DEFAULT.getName();
     }

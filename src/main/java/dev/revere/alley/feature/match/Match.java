@@ -46,6 +46,7 @@ import dev.revere.alley.feature.layout.LayoutService;
 import dev.revere.alley.feature.layout.data.LayoutData;
 import dev.revere.alley.feature.match.data.MatchData;
 import dev.revere.alley.feature.match.data.types.MatchDataSolo;
+import dev.revere.alley.feature.match.internal.types.HideAndSeekMatch;
 import dev.revere.alley.feature.match.internal.types.RoundsMatch;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
@@ -1122,7 +1123,12 @@ public abstract class Match {
     private void processKillerStatActions(Player killer) {
         GameParticipant<MatchGamePlayer> killerParticipant = getParticipant(killer);
         if (killerParticipant != null) {
-            killerParticipant.getLeader().getData().incrementKills();
+            MatchGamePlayer killerGamePlayer = getFromAllGamePlayers(killer);
+            if (killerGamePlayer != null) {
+                killerGamePlayer.getData().incrementKills();
+            } else {
+                killerParticipant.getLeader().getData().incrementKills();
+            }
 
             if (this.isAffectStatistics() && !this.isTeamMatch()) {
                 Profile killerProfile = this.plugin.getService(ProfileService.class).getProfile(killer.getUniqueId());
@@ -2008,6 +2014,9 @@ public abstract class Match {
      *         如果攻击者与受害者在同一参与者队伍中。
      */
     public boolean isInSameTeam(Player attacker, Player victim) {
+        if (this instanceof HideAndSeekMatch hideAndSeekMatch && hideAndSeekMatch.isFreeForAllCombat()) {
+            return false;
+        }
         GameParticipant<MatchGamePlayer> attackerParticipant = this.getParticipant(attacker);
         GameParticipant<MatchGamePlayer> victimParticipant = this.getParticipant(victim);
 
@@ -2022,6 +2031,7 @@ public abstract class Match {
      *                     参与者列表
      */
     public void denyPlayerMovement(List<GameParticipant<MatchGamePlayer>> participants) {
+        if (this instanceof GomokuPlayable) return;
         if (participants.size() == 2) {
             GameParticipant<?> participantA = participants.get(0);
             GameParticipant<?> participantB = participants.get(1);
@@ -2061,7 +2071,7 @@ public abstract class Match {
         double deltaZ = Math.abs(playerLocation.getZ() - location.getZ());
 
         if (deltaX > 0.1 || deltaZ > 0.1) {
-            player.teleport(new Location(location.getWorld(), location.getX(), playerLocation.getY(), location.getZ(), playerLocation.getYaw(), playerLocation.getPitch()));
+            player.teleport(location.clone());
         }
     }
 

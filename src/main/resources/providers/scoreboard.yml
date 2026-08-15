@@ -199,6 +199,19 @@ scoreboard:
           - "&6&l│ &rKills: &a{kills}"
           - "&6&l│ &rDeaths: &c{deaths}"
         hideandseek-match:
+          intermission:
+            - "{sidebar}"
+            - "&6&lʜɪᴅᴇ & ꜱᴇᴇᴋ"
+            - "&6&l│ &rPhase: &6Intermission"
+            - "&6&l│ &rRole: {player-role}"
+            - "&6&l│ &rYour Kills: &a{kills}"
+            - "&6&l│ &rRole select in: &e{time-left}"
+          selecting:
+            - "{sidebar}"
+            - "&6&lʜɪᴅᴇ & ꜱᴇᴇᴋ"
+            - "&6&l│ &rPhase: &eChoosing Roles"
+            - "&6&l│ &rRole: {player-role}"
+            - "&6&l│ &rTime Left: &e{time-left}"
           hiding:
             - "{sidebar}"
             - "&6&lʜɪᴅᴇ & ꜱᴇᴇᴋ"
@@ -311,6 +324,19 @@ scoreboard:
           - "&6&l│ &rYours: &a{your-alive}&f/&a{your-players}"
           - "&6&l│ &rTheirs: &c{opponent-alive}&f/&c{opponent-players}"
         hideandseek-match:
+          intermission:
+            - "{sidebar}"
+            - "&6&lʜɪᴅᴇ & ꜱᴇᴇᴋ"
+            - "&6&l│ &rPhase: &6Intermission"
+            - "&6&l│ &rRole: {player-role}"
+            - "&6&l│ &rYour Kills: &a{kills}"
+            - "&6&l│ &rRole select in: &e{time-left}"
+          selecting:
+            - "{sidebar}"
+            - "&6&lʜɪᴅᴇ & ꜱᴇᴇᴋ"
+            - "&6&l│ &rPhase: &eChoosing Roles"
+            - "&6&l│ &rRole: {player-role}"
+            - "&6&l│ &rTime Left: &e{time-left}"
           hiding:
             - "{sidebar}"
             - "&6&lʜɪᴅᴇ & ꜱᴇᴇᴋ"

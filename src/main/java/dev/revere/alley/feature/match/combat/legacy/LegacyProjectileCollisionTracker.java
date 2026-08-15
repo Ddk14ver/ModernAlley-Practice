@@ -29,8 +29,6 @@ import java.util.UUID;
 
 final class LegacyProjectileCollisionTracker {
     private static final int DEFAULT_OWNER_COLLISION_TICK = 5;
-    private static final float LEGACY_PEARL_SIZE = 0.23F;
-    private static final double TARGET_HITBOX_EXPANSION = 0.3;
     private static final double BROAD_PHASE_EXPANSION = 1.3;
 
     private final LegacyCombatService combatService;
@@ -109,8 +107,8 @@ final class LegacyProjectileCollisionTracker {
 
     private void ensurePearlSize(EnderPearl pearl) {
         BoundingBox currentBox = pearl.getBoundingBox();
-        if (Math.abs(currentBox.getWidthX() - LEGACY_PEARL_SIZE) < 1.0E-4
-                && Math.abs(currentBox.getHeight() - LEGACY_PEARL_SIZE) < 1.0E-4) return;
+        if (Math.abs(currentBox.getWidthX() - LegacyHitboxes.PEARL_SIZE) < 1.0E-4
+                && Math.abs(currentBox.getHeight() - LegacyHitboxes.PEARL_SIZE) < 1.0E-4) return;
 
         try {
             if (this.getHandleMethod == null) {
@@ -128,7 +126,8 @@ final class LegacyProjectileCollisionTracker {
                         "setBoundingBox", this.makeBoundingBoxMethod.getReturnType());
             }
 
-            Object dimensions = this.fixedDimensionsMethod.invoke(null, LEGACY_PEARL_SIZE, LEGACY_PEARL_SIZE);
+            Object dimensions = this.fixedDimensionsMethod.invoke(
+                    null, LegacyHitboxes.PEARL_SIZE, LegacyHitboxes.PEARL_SIZE);
             this.dimensionsField.set(handle, dimensions);
             Location location = pearl.getLocation();
             Object boundingBox = this.makeBoundingBoxMethod.invoke(
@@ -138,7 +137,7 @@ final class LegacyProjectileCollisionTracker {
             if (!this.pearlSizeWarningLogged) {
                 this.pearlSizeWarningLogged = true;
                 AlleyPlugin.getInstance().getLogger().warning(
-                        "Unable to apply the 0.23 legacy ender pearl size: "
+                        "Unable to apply the 0.25 legacy ender pearl size: "
                                 + exception.getClass().getSimpleName());
             }
         }
@@ -184,7 +183,9 @@ final class LegacyProjectileCollisionTracker {
             boolean alleyBot = candidate.getScoreboardTags().contains(BotMatchSession.BOT_ENTITY_TAG);
             if (!candidate.equals(shooter) && !alleyBot && !projectile.canHitEntity(candidate)) continue;
 
-            BoundingBox targetBox = candidate.getBoundingBox().clone().expand(TARGET_HITBOX_EXPANSION);
+            BoundingBox targetBox = candidate instanceof Player
+                    ? LegacyHitboxes.projectileTarget(candidate)
+                    : candidate.getBoundingBox().clone().expand(LegacyHitboxes.PROJECTILE_EXPAND);
             double hitDistance;
             Vector hitPosition;
             if (targetBox.contains(start.getX(), start.getY(), start.getZ())) {

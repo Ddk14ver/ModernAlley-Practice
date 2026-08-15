@@ -59,6 +59,8 @@ public class MatchSettingsButton extends Button {
                 settings.setHideOtherSpectators(!settings.isHideOtherSpectators());
                 AlleyPlugin.getInstance().getService(VisibilityService.class).updateVisibility(player);
             }
+            case SWORD_BLOCK_SOUNDS -> settings.setSwordBlockSoundsEnabled(!settings.isSwordBlockSoundsEnabled());
+            case SHOW_CHAT_LEVEL_PREFIX -> settings.setShowChatLevelPrefix(!settings.isShowChatLevelPrefix());
         }
 
         profile.save();

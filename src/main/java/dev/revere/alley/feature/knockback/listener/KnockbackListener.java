@@ -625,43 +625,37 @@ public class KnockbackListener implements Listener {
     }
 
     /**
-     * A server-controlled Bot has real movement velocity, while a network player mostly
-     * reports walking through position packets. Do not let the Bot's W/strafe velocity
-     * cancel legacy knockback or create sideways inheritance that a real player lacks.
+     * 1.8's knockBack() halves leftover knockback motion, not WASD walk speed.
+     * Packet players report walking through position packets, and bots have real
+     * W/strafe velocity, so {@link Player#getVelocity()} is the wrong input for
+     * both. Inherit only the decayed residual of the last delivered knockback.
      */
     private Vector getLegacyInheritedMotion(Player victim, Vector knockback) {
-        Vector current = victim.getVelocity().clone();
         PlayerKnockbackData data = manager.getPlayerData(victim);
-        if (!data.isServerControlled()) return current;
-
         Vector previousKnockback = data.getLastAppliedKnockbackVelocity();
         long elapsed = Bukkit.getCurrentTick() - data.getLastKnockbackApplicationTick();
         if (previousKnockback == null || elapsed < 0L || elapsed > 20L) {
             return new Vector();
         }
 
+        Vector inherited = new Vector();
         double horizontalLength = Math.hypot(knockback.getX(), knockback.getZ());
-        if (horizontalLength < 1.0E-8D) {
-            current.setX(0.0D).setZ(0.0D);
-        } else {
+        if (horizontalLength >= 1.0E-8D) {
             double directionX = knockback.getX() / horizontalLength;
             double directionZ = knockback.getZ() / horizontalLength;
-            double currentProjection = Math.max(0.0D,
-                    current.getX() * directionX + current.getZ() * directionZ);
             double previousProjection = Math.max(0.0D,
                     previousKnockback.getX() * directionX + previousKnockback.getZ() * directionZ);
             double friction = victim.isOnGround() ? 0.546D : 0.91D;
-            double residualLimit = previousProjection * Math.pow(friction, elapsed);
-            double inherited = Math.min(currentProjection, residualLimit);
-            current.setX(directionX * inherited);
-            current.setZ(directionZ * inherited);
+            double residual = previousProjection * Math.pow(friction, elapsed);
+            inherited.setX(directionX * residual);
+            inherited.setZ(directionZ * residual);
         }
         double residualY = previousKnockback.getY();
         for (long tick = 0L; tick < elapsed; tick++) {
             residualY = (residualY - 0.08D) * 0.98D;
         }
-        current.setY(Math.min(Math.max(0.0D, current.getY()), Math.max(0.0D, residualY)));
-        return current;
+        inherited.setY(Math.max(0.0D, residualY));
+        return inherited;
     }
 
     /** 1.8 treats knockback resistance as a per-hit probability, not a multiplier. */

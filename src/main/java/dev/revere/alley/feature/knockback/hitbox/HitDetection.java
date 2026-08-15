@@ -1,8 +1,13 @@
 package dev.revere.alley.feature.knockback.hitbox;
 
+import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.KnockbackProfile;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
+import dev.revere.alley.feature.match.MatchService;
+import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
+import dev.revere.alley.feature.match.combat.legacy.LegacyHitboxes;
+import dev.revere.alley.feature.match.internal.MatchServiceImpl;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.GameMode;
@@ -51,7 +56,8 @@ public class HitDetection implements Listener {
         PlayerKnockbackData data = manager.getPlayerData(attacker);
         KnockbackProfile profile = manager.getProfile(data.getProfileName());
         if (profile == null) return;
-        if (profile.getHitboxLength() <= 0.6D && profile.getHitboxHeight() <= 1.8D) return;
+        if (!hasLegacySwordCombat(attacker)
+                && profile.getHitboxLength() <= 0.6D && profile.getHitboxHeight() <= 1.8D) return;
 
         int currentTick = Bukkit.getCurrentTick();
         Integer lastTick = lastSwingTick.put(attacker.getUniqueId(), currentTick);
@@ -144,11 +150,15 @@ public class HitDetection implements Listener {
         Vector direction = eye.getDirection();
         Ray ray = new Ray(eye.toVector(), direction);
 
-        double halfWidth = profile.getHitboxLength() / 2.0D;
-        double verticalExpansion = Math.max(0.0D, (profile.getHitboxHeight() - 1.8D) / 2.0D);
-        AABB expandedBox = new AABB(
-                new Vector(-halfWidth, -verticalExpansion, -halfWidth),
-                new Vector(halfWidth, profile.getHitboxHeight() - verticalExpansion, halfWidth));
+        boolean legacyMelee = hasLegacySwordCombat(attacker);
+        AABB expandedBox = null;
+        if (!legacyMelee) {
+            double halfWidth = profile.getHitboxLength() / 2.0D;
+            double verticalExpansion = Math.max(0.0D, (profile.getHitboxHeight() - 1.8D) / 2.0D);
+            expandedBox = new AABB(
+                    new Vector(-halfWidth, -verticalExpansion, -halfWidth),
+                    new Vector(halfWidth, profile.getHitboxHeight() - verticalExpansion, halfWidth));
+        }
         AABB vanillaBox = AABB.fromSize(0.6D, 1.8D);
         double maxDistance = getMaxDistance(profile);
         if (maxDistance <= 0.0D) return;
@@ -164,8 +174,11 @@ public class HitDetection implements Listener {
                     || victim.getUniqueId().equals(attacker.getUniqueId())) continue;
 
             Vector origin = victim.getLocation().toVector();
-            Vector hit = expandedBox.translate(origin).intersectsRay(
-                    ray, 0.0F, (float) maxDistance);
+            Vector hit = legacyMelee
+                    ? AABB.fromBoundingBox(LegacyHitboxes.meleeTarget(victim))
+                            .intersectsRay(ray, 0.0F, (float) maxDistance)
+                    : expandedBox.translate(origin).intersectsRay(
+                            ray, 0.0F, (float) maxDistance);
             if (hit == null) continue;
 
             double distance = eye.toVector().distance(hit);
@@ -173,8 +186,10 @@ public class HitDetection implements Listener {
                 closest = victim;
                 closestHit = hit;
                 closestDistance = distance;
-                vanillaHit = vanillaBox.translate(origin).intersectsRay(
-                        ray, 0.0F, (float) maxDistance) != null;
+                vanillaHit = (legacyMelee
+                        ? AABB.fromBoundingBox(victim.getBoundingBox())
+                        : vanillaBox.translate(origin))
+                        .intersectsRay(ray, 0.0F, (float) maxDistance) != null;
             }
         }
 
@@ -227,6 +242,13 @@ public class HitDetection implements Listener {
     private boolean isUsableAttacker(Player player) {
         return isUsableTarget(player)
                 && isMeleeWeapon(player.getInventory().getItemInMainHand().getType());
+    }
+
+    private boolean hasLegacySwordCombat(Player player) {
+        MatchService matchService = AlleyPlugin.getInstance().getService(MatchService.class);
+        if (!(matchService instanceof MatchServiceImpl service)) return false;
+        LegacyCombatService legacyCombat = service.getLegacyCombatService();
+        return legacyCombat != null && legacyCombat.hasSwordBlockKB(player.getUniqueId());
     }
 
     private boolean isMeleeWeapon(Material material) {

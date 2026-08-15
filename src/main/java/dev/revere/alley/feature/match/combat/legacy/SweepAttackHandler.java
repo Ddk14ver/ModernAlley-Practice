@@ -7,33 +7,24 @@ import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
 import dev.revere.alley.AlleyPlugin;
+import org.bukkit.Location;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 
 /**
- * Suppresses the sweep-attack arc particle for oldSwordBlockKB players.
- * 为 oldSwordBlockKB 玩家抑制横扫攻击的弧形粒子。
+ * Suppresses the 1.21 sweep-attack arc particle for oldSwordBlockKB players.
+ * 为 oldSwordBlockKB 玩家抑制 1.21 横扫攻击的弧形粒子。
  *
- * <p>oldSwordBlockKB removes the modern attack cooldown, so every non-sprint
- * sword swing is a full-cooldown sweep. The sweep's arc particle is delivered to
- * clients as vanilla entity-status {@code 55} (SWEEP_ATTACK) — there is no Bukkit
- * event for it, and cancelling the {@code ENTITY_SWEEP_ATTACK} damage event only
- * removes the damage, not the visual. This packet filter drops that status packet
- * whenever the sweeping entity is in oldSwordBlockKB mode, hiding the arc entirely.
- *
- * <p>oldSwordBlockKB 会把玩家的攻击速度设为 24，因此每次不冲刺的挥剑都是满蓄力横扫。
- * 横扫的弧形粒子通过原版实体状态 {@code 55}（SWEEP_ATTACK）发给客户端——Bukkit
- * 没有对应事件，且取消 {@code ENTITY_SWEEP_ATTACK} 伤害事件只会移除伤害而保留视觉。
- * 该包过滤器在横扫实体处于 oldSwordBlockKB 模式时丢弃该状态包，彻底隐藏弧形。
+ * <p>Cancelling {@code ENTITY_SWEEP_ATTACK} only removes the extra damage.
+ * 1.21 delivers the remaining visual as {@code ParticleTypes.SWEEP_ATTACK}
+ * world particles, not entity-status 55 (that byte is SWAP_HANDS now).
  */
 public class SweepAttackHandler extends PacketAdapter {
-
-    /** Vanilla entity-status byte for a sword sweep attack. 横扫攻击的实体状态字节。 */
-    private static final byte SWEEP_ATTACK_STATUS = 55;
 
     private final LegacyCombatService svc;
 
     public SweepAttackHandler(LegacyCombatService svc) {
-        super(AlleyPlugin.getInstance(), ListenerPriority.HIGH, PacketType.Play.Server.ENTITY_STATUS);
+        super(AlleyPlugin.getInstance(), ListenerPriority.HIGH, PacketType.Play.Server.WORLD_PARTICLES);
         this.svc = svc;
     }
 
@@ -47,20 +38,74 @@ public class SweepAttackHandler extends PacketAdapter {
 
     @Override
     public void onPacketSending(PacketEvent event) {
+        if (event.getPacketType() == PacketType.Play.Server.WORLD_PARTICLES) {
+            suppressSweepParticle(event);
+        }
+    }
+
+    private void suppressSweepParticle(PacketEvent event) {
         PacketContainer packet = event.getPacket();
-        if (packet.getIntegers().size() == 0 || packet.getBytes().size() == 0) {
-            return;
-        }
-        if (packet.getBytes().read(0) != SWEEP_ATTACK_STATUS) {
+        if (!isSweepAttackParticle(packet)) return;
+
+        Player viewer = event.getPlayer();
+        if (this.svc.hasSwordBlockKB(viewer.getUniqueId())) {
+            event.setCancelled(true);
             return;
         }
 
-        Entity entity = ProtocolLibrary.getProtocolManager()
-                .getEntityFromID(event.getPlayer().getWorld(), packet.getIntegers().read(0));
-        if (entity == null || !this.svc.hasSwordBlockKB(entity.getUniqueId())) {
-            return;
+        Location origin = readParticleOrigin(packet, viewer);
+        if (origin == null || origin.getWorld() == null) return;
+        for (Entity entity : origin.getWorld().getNearbyEntities(origin, 3.0, 3.0, 3.0)) {
+            if (entity instanceof Player attacker && this.svc.hasSwordBlockKB(attacker.getUniqueId())) {
+                event.setCancelled(true);
+                return;
+            }
         }
+    }
 
-        event.setCancelled(true);
+    private boolean isSweepAttackParticle(PacketContainer packet) {
+        try {
+            if (packet.getNewParticles().size() > 0) {
+                Object particle = packet.getNewParticles().read(0);
+                return particleNameContainsSweep(particle);
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            if (packet.getParticles().size() > 0) {
+                Object particle = packet.getParticles().read(0);
+                return particleNameContainsSweep(particle);
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private boolean particleNameContainsSweep(Object particle) {
+        if (particle == null) return false;
+        String name = particle.toString();
+        return name.contains("SWEEP") || name.contains("sweep");
+    }
+
+    private Location readParticleOrigin(PacketContainer packet, Player viewer) {
+        try {
+            if (packet.getDoubles().size() >= 3) {
+                return new Location(viewer.getWorld(),
+                        packet.getDoubles().read(0),
+                        packet.getDoubles().read(1),
+                        packet.getDoubles().read(2));
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            if (packet.getFloat().size() >= 3) {
+                return new Location(viewer.getWorld(),
+                        packet.getFloat().read(0),
+                        packet.getFloat().read(1),
+                        packet.getFloat().read(2));
+            }
+        } catch (Throwable ignored) {
+        }
+        return viewer.getLocation();
     }
 }

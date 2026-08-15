@@ -22,9 +22,10 @@ public class GomokuMatch extends DefaultMatch implements GomokuPlayable {
     }
 
     @Override
-    public void setupPlayer(Player player) {
-        super.setupPlayer(player);
-        this.game.setupPlayer(player);
+    protected java.util.concurrent.CompletableFuture<Boolean> teleportToSpawn(Player player) {
+        java.util.concurrent.CompletableFuture<Boolean> spawn = super.teleportToSpawn(player);
+        this.game.setupPlayerAfterSpawn(spawn, player);
+        return spawn;
     }
 
     @Override

@@ -87,19 +87,23 @@ public class AttackSoundSuppressor extends PacketAdapter {
         }
 
         Player recipient = event.getPlayer();
-        if (this.svc.hasOldOffhand(recipient.getUniqueId())) {
+        if (this.svc.hasOldOffhand(recipient.getUniqueId())
+                || this.svc.hasSwordBlockKB(recipient.getUniqueId())) {
             event.setCancelled(true);
             return;
         }
 
-        // Fallback: hide the swoosh from everyone when it originates from an oldOffhand attacker.
+        // Fallback: hide the swoosh from everyone when it originates from a
+        // 1.8-kit attacker so spectators of that fight do not hear it either.
         if (packet.getIntegers().size() >= 3) {
             double x = packet.getIntegers().read(0) / 8.0;
             double y = packet.getIntegers().read(1) / 8.0;
             double z = packet.getIntegers().read(2) / 8.0;
             World world = recipient.getWorld();
             for (Entity entity : world.getNearbyEntities(new Location(world, x, y, z), 0.75, 0.75, 0.75)) {
-                if (entity instanceof Player attacker && this.svc.hasOldOffhand(attacker.getUniqueId())) {
+                if (entity instanceof Player attacker
+                        && (this.svc.hasOldOffhand(attacker.getUniqueId())
+                        || this.svc.hasSwordBlockKB(attacker.getUniqueId()))) {
                     event.setCancelled(true);
                     return;
                 }

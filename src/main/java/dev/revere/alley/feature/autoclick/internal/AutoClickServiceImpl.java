@@ -21,6 +21,7 @@ import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
+import dev.revere.alley.feature.match.combat.legacy.LegacyHitboxes;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
 import io.papermc.paper.event.player.PlayerStopUsingItemEvent;
 import org.bukkit.Bukkit;
@@ -532,18 +533,48 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
         }
         if (range <= 0.0D) return;
 
-        RayTraceResult entityResult = attacker.getWorld().rayTraceEntities(
-                eye, direction, range, this.raySize,
-                entity -> entity instanceof Player
-                        && entity != attacker
-                        && !entity.isDead()
-                        && entity.isValid());
-        if (entityResult == null || !(entityResult.getHitEntity() instanceof Player victim)) return;
+        Player victim;
+        Vector entityHitPosition;
+        LegacyCombatService legacy = legacyCombatService();
+        if (legacy != null && legacy.hasSwordBlockKB(attacker.getUniqueId())) {
+            Player closest = null;
+            Vector closestHit = null;
+            double closestDistance = range;
+            for (Entity entity : attacker.getNearbyEntities(range + 2.0D, range + 2.0D, range + 2.0D)) {
+                if (!(entity instanceof Player target)
+                        || target.equals(attacker)
+                        || target.isDead()
+                        || !target.isValid()
+                        || target.getGameMode() == GameMode.SPECTATOR) continue;
+                RayTraceResult hit = LegacyHitboxes.meleeTarget(target)
+                        .rayTrace(eye.toVector(), direction, range);
+                if (hit == null) continue;
+                double distance = eye.toVector().distance(hit.getHitPosition());
+                if (distance <= closestDistance) {
+                    closest = target;
+                    closestHit = hit.getHitPosition();
+                    closestDistance = distance;
+                }
+            }
+            if (closest == null || closestHit == null) return;
+            victim = closest;
+            entityHitPosition = closestHit;
+        } else {
+            RayTraceResult entityResult = attacker.getWorld().rayTraceEntities(
+                    eye, direction, range, this.raySize,
+                    entity -> entity instanceof Player
+                            && entity != attacker
+                            && !entity.isDead()
+                            && entity.isValid());
+            if (entityResult == null || !(entityResult.getHitEntity() instanceof Player traced)) return;
+            victim = traced;
+            entityHitPosition = entityResult.getHitPosition();
+        }
 
         RayTraceResult blockResult = attacker.getWorld().rayTraceBlocks(
                 eye, direction, range, FluidCollisionMode.NEVER, true);
         if (blockResult != null && blockResult.getHitPosition().distance(eye.toVector())
-                <= entityResult.getHitPosition().distance(eye.toVector()) + 0.01D) {
+                <= entityHitPosition.distance(eye.toVector()) + 0.01D) {
             return;
         }
 

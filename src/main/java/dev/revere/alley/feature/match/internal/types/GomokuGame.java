@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 
@@ -72,6 +73,10 @@ final class GomokuGame {
     }
 
     void setupPlayer(Player player) {
+        setupPlayerAfterSpawn(CompletableFuture.completedFuture(true), player);
+    }
+
+    void setupPlayerAfterSpawn(CompletableFuture<Boolean> spawnTeleport, Player player) {
         player.getInventory().clear();
         player.getInventory().setArmorContents(new ItemStack[4]);
         player.getInventory().setItemInOffHand(null);
@@ -80,8 +85,30 @@ final class GomokuGame {
         player.setGameMode(GameMode.ADVENTURE);
         player.setAllowFlight(true);
         player.setFlying(true);
-        player.teleportAsync(player.getLocation().clone().add(0.0, 60.0, 0.0));
         player.updateInventory();
+        spawnTeleport.thenAccept(ignored -> Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+            if (player.isOnline()) {
+                teleportAboveBoard(player);
+            }
+        }));
+    }
+
+    private void teleportAboveBoard(Player player) {
+        Location view = viewLocation();
+        if (view == null) {
+            player.teleportAsync(player.getLocation().clone().add(0.0, 60.0, 0.0));
+            return;
+        }
+        player.teleportAsync(view);
+    }
+
+    private Location viewLocation() {
+        Location center = getBoardCenter();
+        if (center == null || center.getWorld() == null) return null;
+        Location view = center.clone().add(0.0, 60.0, 0.0);
+        view.setYaw(0.0F);
+        view.setPitch(90.0F);
+        return view;
     }
 
     void startTwoSides(GameParticipant<MatchGamePlayer> participantA,

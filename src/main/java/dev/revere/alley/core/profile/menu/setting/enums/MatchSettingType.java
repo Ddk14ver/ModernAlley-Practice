@@ -34,7 +34,11 @@ public enum MatchSettingType {
                     "&7Limit the ping difference between",
                     "&7you and matched opponents.",
                     "",
-                    formatPingRange(settings.getQueuePingRange()),
+                    formatPingRange("Disabled", settings.getQueuePingRange() == 0),
+                    formatPingRange("+/-30ms", settings.getQueuePingRange() == 30),
+                    formatPingRange("+/-50ms", settings.getQueuePingRange() == 50),
+                    formatPingRange("+/-100ms", settings.getQueuePingRange() == 100),
+                    formatPingRange("+/-200ms", settings.getQueuePingRange() == 200),
                     "",
                     "&aClick to cycle.",
                     CC.MENU_BAR
@@ -53,7 +57,13 @@ public enum MatchSettingType {
             settings -> toggleLore("Only show opponent and system messages", settings.isDisablePublicChatWhenInMatch())),
 
     HIDE_OTHER_SPECTATORS(23, "&6&lHide Other Spectators", Material.SPECTRAL_ARROW,
-            settings -> toggleLore("Hide other spectators while spectating", settings.isHideOtherSpectators()));
+            settings -> toggleLore("Hide other spectators while spectating", settings.isHideOtherSpectators())),
+
+    SWORD_BLOCK_SOUNDS(24, "&6&lSword Block Sounds", Material.SHIELD,
+            settings -> toggleLore("Hear successful and failed sword blocks", settings.isSwordBlockSoundsEnabled())),
+
+    SHOW_CHAT_LEVEL_PREFIX(25, "&6&lChat Level Prefix", Material.EXPERIENCE_BOTTLE,
+            settings -> toggleLore("Show your level before chat messages", settings.isShowChatLevelPrefix()));
 
     public final int slot;
     public final String displayName;
@@ -91,7 +101,7 @@ public enum MatchSettingType {
         );
     }
 
-    private static String formatPingRange(int range) {
-        return range <= 0 ? " &6| &7Disabled" : " &6| &a+/-" + range + "ms";
+    private static String formatPingRange(String label, boolean active) {
+        return " &6│ " + (active ? "&a&l" : "&7") + label;
     }
 }

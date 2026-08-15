@@ -1,11 +1,13 @@
-# Alley
+# ModernAlley
 
-**Developed By [Revere Group](https://www.revere.no)**  
-*Primary Contributors: [Hamza](https://github.com/hammzar), [Remi](https://github.com/hmRemi) & [Emmy](https://github.com/hmEmmy)*
+**Developed By [Ddk1] & [Revere Group] 
+*Primary Contributors: [Hamza], [Remi] , [Emmy] & [Ddk1]
 
-**Alley** is a custom Practice PvP core for **Minecraft 1.8**, built for performance, flexibility, and competitive gameplay. It's modular, customizable, and designed to support server admins with powerful tools for match management, player control, and visuals.
+(Actually the 1.8.8Alley is **No longer in development**.This is an Alley fork by Ddk1 and All new codes is unrelated to the original developer [Revere Group]. If you need to get in touch, please contact Ddk1.)
 
-> Alley is currently in **active development** and is **not** considered a final product.
+**ModernAlley** is a fully custom, feature-rich 1.21.11 Practice PvP core that Modernized from the 1.8.8 Alley practice plugin, built for performance, flexibility, and competitive gameplay. It's modular, customizable, and designed to support server admins with powerful tools for match management, player control, and visuals.
+
+> ModernAlley is currently in **active development** and is **not** considered a final product.
 
 
 ## Table of Contents
@@ -29,16 +31,16 @@
 
 ## Usage
 
-Alley is built to be easily configurable. After installation, access the configuration files in the `plugins` folder to customize settings such as match parameters, visuals, and player permissions to fit your server’s specific needs.
+ModernAlley is built to be easily configurable. After installation, access the configuration files in the `plugins` folder to customize settings such as match parameters, visuals, and player permissions to fit your server’s specific needs.
 
 
 ## Guidelines
 
-By using Alley, you agree to the following terms:
+By using ModernAlley, you agree to the following terms:
 
 - This project may not be used for commercial gain without explicit permission from Revere. Credit must be given to the original authors by including their names and a link to the official repository in any distributed version.
 - Do not claim this project as your own, and do not remove existing copyright notices or license information.
-- Alley must remain free of charge and may not be used as a paid product.
+- ModernAlley must remain free of charge and may not be used as a paid product.
 
 
 ## Contributing
@@ -53,14 +55,12 @@ We welcome contributions to improve Alley! If you would like to contribute, plea
 
 ## Other Platforms
 
-- [BuiltByBit (MC-Market)](https://builtbybit.com/resources/alley-next-generation-practice-core.73088/)
-- [SpigotMC](https://www.spigotmc.org/resources/alley-next-generation-practice-core.127500/)
+None so far.
 
 ## Authors
 
-Alley is developed and maintained by **Revere Group**. For inquiries or to reach the team:
+ModernAlley is developed and maintained by **Ddk1 & Revere Group**. For inquiries or to reach the team:
 
-- **Website**: [revere.no](https://www.revere.no)
-- **Email**: [support@revere.no](mailto:support@revere.no)
-
+- **Website**: [revere.no]
+- **Email**: [support@revere.no] , [Telethafoo@gmail.com] , [2717813126@qq.com] (The last two are Ddk1.)
 Thank you for using and supporting Alley!

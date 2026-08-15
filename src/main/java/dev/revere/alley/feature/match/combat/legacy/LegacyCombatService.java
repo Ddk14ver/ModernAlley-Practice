@@ -31,6 +31,10 @@ public class LegacyCombatService {
     private static final String LEGACY_COLLISION_TEAM = "alley_legacy_nc";
     private static final double LEGACY_ATTACK_SPEED = 1024.0D;
     private static final int LEGACY_NATURAL_REGEN_RATE = 80;
+    // 1.8 sword block applies on the same tick the item is raised. The default
+    // blocks_attacks component uses the shield warmup (5 ticks / 0.25s).
+    private static final BlocksAttacks LEGACY_SWORD_BLOCKS_ATTACKS =
+            BlocksAttacks.blocksAttacks().blockDelaySeconds(0.0F).build();
 
     private final Set<UUID> swordBlockKB = ConcurrentHashMap.newKeySet();
     private final Set<UUID> oldFood = ConcurrentHashMap.newKeySet();
@@ -152,8 +156,8 @@ public class LegacyCombatService {
     // ---- blocks_attacks ----
     public void applyBlockableToSwords(Player p) {
         for (ItemStack i : p.getInventory().getContents())
-            if (i != null && isSword(i.getType()) && !i.hasData(DataComponentTypes.BLOCKS_ATTACKS))
-                i.setData(DataComponentTypes.BLOCKS_ATTACKS, BlocksAttacks.blocksAttacks());
+            if (i != null && isSword(i.getType()))
+                i.setData(DataComponentTypes.BLOCKS_ATTACKS, LEGACY_SWORD_BLOCKS_ATTACKS);
     }
     public void removeBlockableFromSwords(Player p) {
         for (ItemStack i : p.getInventory().getContents())
@@ -162,8 +166,8 @@ public class LegacyCombatService {
     }
     public void onHeldSword(Player p, ItemStack item) {
         if (!hasSwordBlockKB(p.getUniqueId())) return;
-        if (item != null && isSword(item.getType()) && !item.hasData(DataComponentTypes.BLOCKS_ATTACKS))
-            item.setData(DataComponentTypes.BLOCKS_ATTACKS, BlocksAttacks.blocksAttacks());
+        if (item != null && isSword(item.getType()))
+            item.setData(DataComponentTypes.BLOCKS_ATTACKS, LEGACY_SWORD_BLOCKS_ATTACKS);
     }
 
     // ---- Attack cooldown ----

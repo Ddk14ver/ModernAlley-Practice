@@ -38,8 +38,11 @@ public class MatchScoreboardHideAndSeek extends BaseMatchScoreboard {
         HideAndSeekMatch match = (HideAndSeekMatch) profile.getMatch();
 
         String configPath = match.isTeamMatch() ? getTeamConfigPath() : getSoloConfigPath();
-        boolean isHidingPhase = match.getGameEndTask() == null;
-        if (isHidingPhase) {
+        if (match.isIntermissionPhase()) {
+            configPath = configPath + ".intermission";
+        } else if (match.isSelectingRoles()) {
+            configPath = configPath + ".selecting";
+        } else if (match.getGameEndTask() == null) {
             configPath = configPath + ".hiding";
         } else {
             configPath = configPath + ".seeking";
@@ -68,20 +71,16 @@ public class MatchScoreboardHideAndSeek extends BaseMatchScoreboard {
 
         long hidersAlive = hiders.getPlayers().stream().filter(p -> !p.isDead()).count();
         long seekersAlive = seekers.getPlayers().stream().filter(p -> !p.isDead()).count();
-        String playerRole = seekers.containsPlayer(player.getUniqueId()) ? "&cSeeker" : "&aHider";
-
-        String timeLeft;
-        long totalElapsedSeconds = match.getElapsedTime() / 1000;
-        boolean isHidingPhase = match.getGameEndTask() == null;
-
-        if (isHidingPhase) {
-            long remaining = Math.max(0, match.getHidingTimeSeconds() - totalElapsedSeconds);
-            timeLeft = TimeUtil.formatTimeFromSeconds((int) remaining);
+        String playerRole;
+        if (match.isIntermissionPhase()) {
+            playerRole = "&6Fighting";
+        } else if (match.isSelectingRoles()) {
+            playerRole = "&eSelecting";
         } else {
-            long elapsedInSeekingPhase = totalElapsedSeconds - match.getHidingTimeSeconds();
-            long remaining = Math.max(0, match.getGameTimeSeconds() - elapsedInSeekingPhase);
-            timeLeft = TimeUtil.formatTimeFromSeconds((int) remaining);
+            playerRole = seekers.containsPlayer(player.getUniqueId()) ? "&cSeeker" : "&aHider";
         }
+
+        String timeLeft = TimeUtil.formatTimeFromSeconds(match.getPhaseSecondsRemaining());
 
         return baseLine
                 .replace("{player-role}", playerRole)

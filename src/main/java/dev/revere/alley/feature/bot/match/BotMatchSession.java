@@ -33,6 +33,7 @@ import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.match.listener.MatchListener;
+import dev.revere.alley.feature.match.combat.legacy.LegacyHitboxes;
 import dev.revere.alley.feature.match.combat.legacy.LegacyProjectileData;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
 import dev.revere.alley.feature.match.internal.types.DefaultMatch;
@@ -878,6 +879,10 @@ public final class BotMatchSession {
     }
 
     private BoundingBox getCombatTargetBox() {
+        if (kit.isSettingEnabled(KitSettingOldSwordBlocking.class)) {
+            return LegacyHitboxes.meleeTarget(player);
+        }
+
         BoundingBox box = player.getBoundingBox().clone();
         KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
         KnockbackProfile profile = manager.getProfile(manager.getPlayerData(bot).getProfileName());

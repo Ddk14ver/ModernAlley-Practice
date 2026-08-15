@@ -104,6 +104,38 @@ public interface Core {
      */
     ChatColor getTagColor(Player player);
 
+    /** Applies the player's level-prefix preference to the configured chat format. */
+    default String applyChatLevelPrefix(Profile profile, String chatFormat) {
+        boolean enabled = profile.getProfileData().getSettingData().isShowChatLevelPrefix();
+        if (!enabled) {
+            return stripDisabledLevelPrefix(chatFormat);
+        }
+
+        String level = Objects.requireNonNull(CC.translate(AlleyPlugin.getInstance().getService(LevelService.class)
+                .getLevel(profile.getProfileData().getGlobalLevel()).getDisplayName()), "Level cannot be null");
+        String levelPrefix = CC.translate("&7[" + level + "&7]&r ");
+
+        if (chatFormat.contains("{level-prefix}")) {
+            return chatFormat.replace("{level-prefix}", levelPrefix);
+        }
+
+        if (chatFormat.contains("{level}")) {
+            return chatFormat.replace("{level}", level);
+        }
+
+        return levelPrefix + chatFormat;
+    }
+
+    default String stripDisabledLevelPrefix(String chatFormat) {
+        String stripped = chatFormat
+                .replace("{level-prefix}", "")
+                .replace("{level}", "");
+        // Configs such as "&7[{level}&7]&r " leave the brackets behind after
+        // the placeholder is removed. Drop that leftover wrapper too.
+        stripped = stripped.replaceAll("(?i)(&7|§7)?\\[\\s*](&7|§7)?(&r|§r)?\\s*", "");
+        return stripped;
+    }
+
     /**
      * Retrieves the chat format for a given player and message.
      * 获取给定玩家和消息的聊天格式。
@@ -138,8 +170,6 @@ public interface Core {
                     .findFirst().orElse(null);
             selectedTitle = CC.translate(titleRec != null ? titleRec.getPrefix() : selectedTitleRaw) + " ";
         }
-        String level = CC.translate(AlleyPlugin.getInstance().getService(LevelService.class).getLevel(profile.getProfileData().getGlobalLevel()).getDisplayName());
-
         String tagAppearanceFormat = AlleyPlugin.getInstance().getService(LocaleService.class).getString(SettingsLocaleImpl.SERVER_CHAT_FORMAT_TAG_APPEARANCE_FORMAT)
                 .replace("{tag-color}", String.valueOf(tagColor))
                 .replace("{tag-prefix}", CC.translate(tagPrefix));
@@ -148,7 +178,10 @@ public interface Core {
             eventMessage = CC.translate(eventMessage);
         }
 
-        return AlleyPlugin.getInstance().getService(LocaleService.class).getString(SettingsLocaleImpl.SERVER_CHAT_FORMAT_GLOBAL)
+        String chatFormat = this.applyChatLevelPrefix(profile, AlleyPlugin.getInstance().getService(LocaleService.class)
+                .getString(SettingsLocaleImpl.SERVER_CHAT_FORMAT_GLOBAL));
+
+        return chatFormat
                 .replace("{prefix}", prefix)
                 .replace("{rank-color}", String.valueOf(rankColor))
                 .replace("{name-color}", String.valueOf(nameColor))
@@ -157,7 +190,6 @@ public interface Core {
                 .replace("{tag}", tagPrefix.isEmpty() ? "" : tagAppearanceFormat)
                 .replace("{separator}", separator)
                 .replace("{message}", eventMessage)
-                .replace("{level}", Objects.requireNonNull(CC.translate(level), "Level cannot be null"))
                 .replace("{selected-title}", selectedTitle);
     }
 }

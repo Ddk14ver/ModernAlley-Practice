@@ -24,6 +24,10 @@ public class AABB {
         return new AABB(new Vector(-half, 0, -half), new Vector(half, height, half));
     }
 
+    public static AABB fromBoundingBox(org.bukkit.util.BoundingBox box) {
+        return new AABB(box.getMin(), box.getMax());
+    }
+
     /**
      * Shift this AABB by a location vector.
      */

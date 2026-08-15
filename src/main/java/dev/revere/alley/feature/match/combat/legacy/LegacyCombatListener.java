@@ -4,6 +4,8 @@ import com.destroystokyo.paper.event.entity.ProjectileCollideEvent;
 import com.destroystokyo.paper.event.player.PlayerLaunchProjectileEvent;
 import io.papermc.paper.event.player.PlayerStopUsingItemEvent;
 import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.core.profile.Profile;
+import dev.revere.alley.core.profile.ProfileService;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import org.bukkit.*;
 import org.bukkit.enchantments.Enchantment;
@@ -26,7 +28,6 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
 import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.util.BoundingBox;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
@@ -110,7 +111,6 @@ public class LegacyCombatListener implements Listener {
         if (!(e.getEntity() instanceof Player victim)) return;
         if (!isLegacyBlockableDamage(e)) return;
         if (!svc.isBlocking(victim.getUniqueId())) return;
-        if (!victim.isBlocking()) { svc.setBlocking(victim.getUniqueId(), false); return; }
         ItemStack main = victim.getInventory().getItemInMainHand();
         if (!main.getType().name().endsWith("_SWORD")) return;
 
@@ -119,7 +119,7 @@ public class LegacyCombatListener implements Listener {
             if (e.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)) {
                 e.setDamage(EntityDamageEvent.DamageModifier.BLOCKING, 0.0);
             }
-            victim.getWorld().playSound(victim.getLocation(), Sound.ITEM_SHIELD_BREAK, 0.5f, 1.0f);
+            playSwordBlockSound(victim, Sound.ITEM_SHIELD_BREAK, 0.5f, 1.0f);
             return;
         }
 
@@ -131,7 +131,14 @@ public class LegacyCombatListener implements Listener {
         } else {
             e.setDamage(Math.max(0.0, e.getDamage() - reduction));
         }
-        victim.getWorld().playSound(victim.getLocation(), Sound.ITEM_SHIELD_BLOCK, 1.0f, 0.8f);
+        playSwordBlockSound(victim, Sound.ITEM_SHIELD_BLOCK, 1.0f, 0.8f);
+    }
+
+    private void playSwordBlockSound(Player player, Sound sound, float volume, float pitch) {
+        Profile profile = plugin().getService(ProfileService.class).getProfile(player.getUniqueId());
+        if (profile == null || !profile.getProfileData().getSettingData().isSwordBlockSoundsEnabled()) return;
+
+        player.playSound(player.getLocation(), sound, volume, pitch);
     }
 
     private boolean isLegacyBlockableDamage(EntityDamageByEntityEvent event) {
@@ -359,7 +366,7 @@ public class LegacyCombatListener implements Listener {
         knockbackManager.getPlayerData(victim).setSuppressLegacyPearlVelocity(true);
         victim.setNoDamageTicks(0);
         try {
-            victim.damage(0.001, pearl);
+            victim.damage(0.1, pearl);
             EntityDamageEvent acceptedDamage = acceptedPearlDamageEvents.remove(victimId);
             if (acceptedDamage != null && !acceptedDamage.isCancelled()) {
                 accepted = true;
@@ -389,10 +396,13 @@ public class LegacyCombatListener implements Listener {
                 || !svc.hasSwordBlockKB(victim.getUniqueId())) return;
 
         EntityType type = damager.getType();
-        if (type == EntityType.SNOWBALL || type == EntityType.EGG || type == EntityType.ENDER_PEARL) {
-            if (e.getDamage() == 0.0) {
-                e.setDamage(0.001);
-            }
+        if (type == EntityType.ENDER_PEARL) {
+            // Vanilla emits a zero-damage event when a pearl collides with an
+            // entity. Keep that native event harmless; onLegacyPearlHit below
+            // applies the single fixed target hit and the legacy knockback.
+            if (!attacker.equals(victim)) e.setDamage(0.0);
+        } else if (type == EntityType.SNOWBALL || type == EntityType.EGG) {
+            if (e.getDamage() == 0.0) e.setDamage(0.001);
             if (e.isApplicable(EntityDamageEvent.DamageModifier.ABSORPTION))
                 e.setDamage(EntityDamageEvent.DamageModifier.ABSORPTION, 0);
         }
@@ -403,8 +413,31 @@ public class LegacyCombatListener implements Listener {
         if (!(event.getEntity() instanceof Player victim)) return;
         UUID victimId = victim.getUniqueId();
         if (pendingPearlDamageVictims.contains(victimId)) {
-            event.setDamage(0.0);
+            setFixedPearlDamage(event, 0.1);
             acceptedPearlDamageEvents.put(victimId, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onLegacyPearlSelfDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) return;
+        if (!(event instanceof EntityDamageByEntityEvent damageEvent)
+                || !(damageEvent.getDamager() instanceof EnderPearl pearl)
+                || !(pearl.getShooter() instanceof Player attacker)
+                || !attacker.equals(victim)
+                || !LegacyProjectileData.isMarked(pearl)
+                || !svc.hasSwordBlockKB(victim.getUniqueId())) return;
+
+        setFixedPearlDamage(event, 0.5);
+    }
+
+    /** Keeps pearl damage independent of armour, resistance, and absorption modifiers. */
+    private void setFixedPearlDamage(EntityDamageEvent event, double amount) {
+        event.setDamage(amount);
+        for (EntityDamageEvent.DamageModifier modifier : EntityDamageEvent.DamageModifier.values()) {
+            if (modifier != EntityDamageEvent.DamageModifier.BASE && event.isApplicable(modifier)) {
+                event.setDamage(modifier, 0.0);
+            }
         }
     }
 
@@ -514,12 +547,12 @@ public class LegacyCombatListener implements Listener {
         return hook.getWorld().getNearbyEntities(hook.getLocation(), 1.0, 2.0, 1.0).stream()
                 .filter(en -> en instanceof Player)
                 .filter(en -> shooter == null || !en.getUniqueId().equals(shooter.getUniqueId()))
-                .filter(en -> legacyRodHitbox((Player) en).contains(hook.getLocation().toVector()))
+                .filter(en -> LegacyHitboxes.projectileTarget(en).contains(hook.getLocation().toVector()))
                 .min(Comparator.comparingDouble(en -> en.getLocation().distanceSquared(hook.getLocation())))
                 .orElse(null);
     }
 
-    /** Checks each flight segment against the 1.8 profile's 0.7 x 1.8 player box. */
+    /** Checks each flight segment against the 1.8 standing box expanded by 0.3. */
     private Player findRodHitAlongPath(FishHook hook, Player attacker, Location from, Location to) {
         Vector travel = to.toVector().subtract(from.toVector());
         double distance = travel.length();
@@ -534,7 +567,8 @@ public class LegacyCombatListener implements Listener {
         for (Entity entity : hook.getWorld().getNearbyEntities(midpoint, searchRadius, 2.0, searchRadius)) {
             if (!(entity instanceof Player target) || target.equals(attacker) || target.isDead()) continue;
 
-            RayTraceResult hit = legacyRodHitbox(target).rayTrace(from.toVector(), direction, distance);
+            RayTraceResult hit = LegacyHitboxes.projectileTarget(target)
+                    .rayTrace(from.toVector(), direction, distance);
             if (hit == null) continue;
 
             double hitDistance = from.toVector().distanceSquared(hit.getHitPosition());
@@ -544,12 +578,6 @@ public class LegacyCombatListener implements Listener {
             }
         }
         return closest;
-    }
-
-    private BoundingBox legacyRodHitbox(Player player) {
-        BoundingBox box = player.getBoundingBox();
-        double horizontalExpansion = Math.max(0.0, (0.7 - Math.max(box.getWidthX(), box.getWidthZ())) / 2.0);
-        return box.expand(horizontalExpansion, 0.0, horizontalExpansion);
     }
 
     // KB handled by KnockbackListener — see feature/knockback/listener/

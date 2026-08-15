@@ -8,13 +8,10 @@ import dev.revere.alley.core.locale.LocaleService;
 import dev.revere.alley.core.locale.internal.impl.SettingsLocaleImpl;
 import dev.revere.alley.core.profile.Profile;
 import dev.revere.alley.core.profile.ProfileService;
-import dev.revere.alley.feature.level.LevelService;
 import me.activated.core.api.tags.Tag;
 import me.activated.core.plugin.AquaCoreAPI;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
-
-import java.util.Objects;
 
 /**
  * @author Emmy
@@ -119,8 +116,6 @@ public class AquaCoreImpl implements Core {
                     .findFirst().orElse(null);
             selectedTitle = CC.translate(titleRec != null ? titleRec.getPrefix() : selectedTitleRaw) + " ";
         }
-        String level = CC.translate(AlleyPlugin.getInstance().getService(LevelService.class).getLevel(profile.getProfileData().getGlobalLevel()).getDisplayName());
-
         String tagAppearanceFormat = localeService.getString(SettingsLocaleImpl.SERVER_CHAT_FORMAT_TAG_APPEARANCE_FORMAT)
                 .replace("{tag-color}", String.valueOf(this.getTagColor(player)))
                 .replace("{tag-prefix}", CC.translate(this.getTagPrefix(player)));
@@ -129,7 +124,10 @@ public class AquaCoreImpl implements Core {
             eventMessage = CC.translate(eventMessage);
         }
 
-        return localeService.getString(SettingsLocaleImpl.SERVER_CHAT_FORMAT_GLOBAL)
+        String chatFormat = this.applyChatLevelPrefix(profile,
+                localeService.getString(SettingsLocaleImpl.SERVER_CHAT_FORMAT_GLOBAL));
+
+        return chatFormat
                 .replace("{prefix}", prefix)
                 .replace("{rank-color}", String.valueOf(this.getRankColor(player)))
                 .replace("{name-color}", String.valueOf(nameColor))
@@ -138,7 +136,6 @@ public class AquaCoreImpl implements Core {
                 .replace("{tag}", this.getTagPrefix(player).isEmpty() ? "" : tagAppearanceFormat)
                 .replace("{separator}", separator)
                 .replace("{message}", eventMessage)
-                .replace("{level}", Objects.requireNonNull(CC.translate(level), "Level cannot be null"))
                 .replace("{selected-title}", selectedTitle);
     }
 }

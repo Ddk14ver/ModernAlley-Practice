@@ -539,6 +539,8 @@ public class MongoUtility {
                 .put("allowSpectators", settingData.isAllowSpectators())
                 .put("disablePublicChatWhenInMatch", settingData.isDisablePublicChatWhenInMatch())
                 .put("hideOtherSpectators", settingData.isHideOtherSpectators())
+                .put("swordBlockSoundsEnabled", settingData.isSwordBlockSoundsEnabled())
+                .put("showChatLevelPrefix", settingData.isShowChatLevelPrefix())
                 .put("chatChannel", safeString(settingData.getChatChannel()))
                 .put("time", safeString(settingData.getTime()))
                 .build();
@@ -945,6 +947,8 @@ public class MongoUtility {
         settingData.setAllowSpectators(settingDocument.getBoolean("allowSpectators", DEFAULT_BOOLEAN_TRUE));
         settingData.setDisablePublicChatWhenInMatch(settingDocument.getBoolean("disablePublicChatWhenInMatch", DEFAULT_BOOLEAN_FALSE));
         settingData.setHideOtherSpectators(settingDocument.getBoolean("hideOtherSpectators", DEFAULT_BOOLEAN_FALSE));
+        settingData.setSwordBlockSoundsEnabled(settingDocument.getBoolean("swordBlockSoundsEnabled", DEFAULT_BOOLEAN_FALSE));
+        settingData.setShowChatLevelPrefix(settingDocument.getBoolean("showChatLevelPrefix", DEFAULT_BOOLEAN_FALSE));
 
         String chatChannel = settingDocument.getString("chatChannel");
         settingData.setChatChannel(chatChannel != null ? chatChannel : ChatChannel.GLOBAL.toString());

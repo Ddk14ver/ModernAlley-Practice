@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 /**
@@ -71,8 +72,15 @@ public class FFAMatch extends Match {
     public void setupPlayer(Player player) {
         super.setupPlayer(player);
 
+        teleportToSpawn(player);
+    }
+
+    protected CompletableFuture<Boolean> teleportToSpawn(Player player) {
         Location spawn = this.getArena().getPos1();
-        player.teleportAsync(spawn);
+        if (spawn == null) {
+            return CompletableFuture.completedFuture(false);
+        }
+        return player.teleportAsync(spawn);
     }
 
     @Override

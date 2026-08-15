@@ -58,6 +58,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * @author Remi
@@ -106,12 +107,20 @@ public class DefaultMatch extends Match {
         super.setupPlayer(player);
         this.applyColorKit(player);
 
-        Location spawnLocation = this.getParticipantA().containsPlayer(player.getUniqueId()) ? getArena().getPos1() : getArena().getPos2();
-        player.teleportAsync(spawnLocation);
+        teleportToSpawn(player).thenRun(() -> {
+            if (this.getKit().isSettingEnabled(KitSettingRaiding.class)) {
+                this.determineRolesAndGiveKit(player);
+            }
+        });
+    }
 
-        if (this.getKit().isSettingEnabled(KitSettingRaiding.class)) {
-            this.determineRolesAndGiveKit(player);
+    protected CompletableFuture<Boolean> teleportToSpawn(Player player) {
+        Location spawnLocation = this.getParticipantA().containsPlayer(player.getUniqueId())
+                ? getArena().getPos1() : getArena().getPos2();
+        if (spawnLocation == null) {
+            return CompletableFuture.completedFuture(false);
         }
+        return player.teleportAsync(spawnLocation);
     }
 
     @Override
