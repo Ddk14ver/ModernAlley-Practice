@@ -33,6 +33,7 @@ import dev.revere.alley.feature.match.Match;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.MatchState;
 import dev.revere.alley.feature.match.listener.MatchListener;
+import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyHitboxes;
 import dev.revere.alley.feature.match.combat.legacy.LegacyProjectileData;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
@@ -92,7 +93,10 @@ public final class BotMatchSession {
     private static final int HEAL_ACTION_TIMEOUT_TICKS = 20;
     private static final int GOLDEN_APPLE_USE_TICKS = 32;
     private static final int BUFF_POTION_USE_TICKS = 32;
-    private static final long W_TAP_RELEASE_NANOS = 80_000_000L;
+    private static final int BLOCK_HIT_USE_TICKS = 10;
+    private static final double BLOCK_HIT_TRIGGER_RATE = 0.15D;
+    private static final double BLOCK_HIT_MOVEMENT_SCALE = 0.2D;
+    private static final double BLOCK_HIT_MOVEMENT_STEP = 0.2D;
     private static final int BOW_CHARGE_TICKS = 18;
     private static final int BOW_USE_DURATION_TICKS = 72_000;
     private static final int BLOCK_AIM_TICKS = 2;
@@ -117,6 +121,11 @@ public final class BotMatchSession {
     private final int countdownTicks;
     private final int timeLimitTicks;
     private final int returnDelayTicks;
+    private final int legacySprintRestartDelayTicks;
+    private final int legacyKnockbackInputDelayTicks;
+    private final double legacyKnockbackInputScale;
+    private final double legacyInputRecoveryStep;
+    private final double legacyStrafeRecoveryStep;
     private final boolean debug;
     private final PlayerProfile botSkinProfile;
     private final Map<Location, BlockState> changedBlocks = new LinkedHashMap<>();
@@ -172,11 +181,21 @@ public final class BotMatchSession {
     private Vector healingEscapeDirection;
     private double attackProgress;
     private long wTapReleaseUntilNanos;
+    private boolean pendingWTap;
+    private boolean blockHitActive;
+    private int blockHitUntilTick;
+    private double blockHitMovementScale = 1.0D;
     private boolean pausedForOpponent;
     private int attackAttemptSequence;
     private int acceptedAttackSequence;
     private float originalWalkSpeed;
     private double strafeDirection = 1.0D;
+    private boolean legacyMovementInitialized;
+    private double legacyForwardInput = 1.0D;
+    private double legacyStrafeInput;
+    private int legacyInputRecoveryTick;
+    private int legacySprintResumeTick;
+    private int lastLegacyKnockbackRecoveryTick = Integer.MIN_VALUE;
 
     public BotMatchSession(BotServiceImpl service, Player player, Kit kit, Arena arena,
                            BotDifficultyProfile difficulty, FileConfiguration config,
@@ -190,6 +209,16 @@ public final class BotMatchSession {
         this.countdownTicks = Math.max(0, config.getInt("countdown-seconds", 3)) * 20;
         this.timeLimitTicks = Math.max(30, config.getInt("match-time-limit-seconds", 300)) * 20;
         this.returnDelayTicks = Math.max(0, config.getInt("return-to-lobby-delay-seconds", 3)) * 20;
+        this.legacySprintRestartDelayTicks = Math.max(1, Math.min(5,
+                config.getInt("legacy-movement.sprint-restart-delay-ticks", 2)));
+        this.legacyKnockbackInputDelayTicks = Math.max(0, Math.min(5,
+                config.getInt("legacy-movement.knockback-input-delay-ticks", 1)));
+        this.legacyKnockbackInputScale = clamp(
+                config.getDouble("legacy-movement.knockback-input-scale", 0.35D), 0.0D, 1.0D);
+        this.legacyInputRecoveryStep = clamp(
+                config.getDouble("legacy-movement.input-recovery-step", 0.5D), 0.05D, 1.0D);
+        this.legacyStrafeRecoveryStep = clamp(
+                config.getDouble("legacy-movement.strafe-recovery-step", 0.21D), 0.01D, 1.0D);
         this.debug = config.getBoolean("debug", false);
         this.botSkinProfile = botSkinProfile;
     }
@@ -342,7 +371,7 @@ public final class BotMatchSession {
         bot.setNoDamageTicks(0);
         bot.setWalkSpeed(0.2F);
         applyBotMovementSpeed();
-        bot.setSprinting(true);
+        setBotSprinting(true);
         this.matchContext.applyColorKit(bot);
         selectCombatItem();
         syncBotEquipment();
@@ -372,8 +401,7 @@ public final class BotMatchSession {
         if (!this.debug) return;
 
         PlayerKnockbackData data = manager.getPlayerData(bot);
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
-        if (profile == null) profile = manager.getDefaultProfile();
+        KnockbackProfile profile = manager.getAppliedProfile(bot);
         if (profile == null) {
             trace("No KB profile resolved for kitProfile=" + kit.getKnockbackProfile());
             return;
@@ -383,6 +411,7 @@ public final class BotMatchSession {
                 + " match=" + matchContext.getClass().getSimpleName()
                 + " kitProfile=" + kit.getKnockbackProfile()
                 + " resolvedProfile=" + profile.getName()
+                + " branch=" + profile.getBranch()
                 + " horizontal=" + profile.getHorizontalGround() + "/" + profile.getHorizontalAir()
                 + " vertical=" + profile.getVerticalGround() + "/" + profile.getVerticalAir()
                 + " interactionRange=" + profile.getEntityInteractionRange()
@@ -445,7 +474,16 @@ public final class BotMatchSession {
             return;
         }
 
-        if (pauseForOpponent()) return;
+        tickBotBlockHit();
+        if (pauseForOpponent()) {
+            if (this.blockHitActive) return;
+            tickPausedOpponentActions();
+            return;
+        }
+        if (this.blockHitActive) {
+            updateNavigation();
+            return;
+        }
 
         if (this.goldenAppleSlot >= 0) {
             tickGoldenAppleUse();
@@ -529,8 +567,7 @@ public final class BotMatchSession {
         } else if (nativeProjectilePending) {
             Vector nativeVelocity = bot.getVelocity();
             if (nativeVelocity.getY() < 0.0D) {
-                KnockbackProfile profile = manager.getProfile(data.getProfileName());
-                if (profile == null) profile = manager.getDefaultProfile();
+                KnockbackProfile profile = manager.getAppliedProfile(bot);
                 if (profile != null && profile.isDisableDownwardKb()) {
                     nativeVelocity = nativeVelocity.clone().setY(0.0D);
                     bot.setVelocity(nativeVelocity);
@@ -545,6 +582,10 @@ public final class BotMatchSession {
 
         PlayerKnockbackData data = AlleyPlugin.getInstance().getService(KnockbackManager.class)
                 .getPlayerData(bot);
+        if (usesLegacyBotMovement() && velocity != null
+                && velocity.getX() * velocity.getX() + velocity.getZ() * velocity.getZ() > 1.0E-4D) {
+            handleAcceptedBotKnockback();
+        }
         if (this.debug) {
             trace("KB applied via " + source + " profile=" + data.getProfileName()
                     + " ground=" + bot.isOnGround() + " velocity=" + formatVector(velocity));
@@ -561,6 +602,15 @@ public final class BotMatchSession {
                 ? "null" : formatVector(data.getVelocity()))
                 + " nativeMarker=" + data.getPendingNativeProjectileVelocityTick()
                 + " native=" + formatVector(nativeVelocity));
+    }
+
+    public void handleAcceptedBotKnockback() {
+        if (this.ended || this.bot == null || !usesLegacyBotMovement()) return;
+        if (this.lastLegacyKnockbackRecoveryTick != Integer.MIN_VALUE
+                && this.ticks - this.lastLegacyKnockbackRecoveryTick <= 1) return;
+
+        this.lastLegacyKnockbackRecoveryTick = this.ticks;
+        beginLegacyMovementRecovery(true, true);
     }
 
     private void tickCountdown() {
@@ -610,7 +660,7 @@ public final class BotMatchSession {
             this.buffPotionSlot = holdItem(slot);
             this.buffPotionFinishTick = this.ticks + BUFF_POTION_USE_TICKS;
             this.buffPotionEffects = List.copyOf(effects);
-            bot.setSprinting(false);
+            setBotSprinting(false);
             setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
             startUsingHeldItem(BUFF_POTION_USE_TICKS);
             bot.updateInventory();
@@ -626,7 +676,7 @@ public final class BotMatchSession {
             return;
         }
 
-        bot.setSprinting(false);
+        setBotSprinting(false);
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.buffPotionFinishTick) {
             keepUsingHeldItem(Math.min(BUFF_POTION_USE_TICKS,
@@ -697,9 +747,35 @@ public final class BotMatchSession {
             this.pausedForOpponent = true;
             interruptForOpponentPause();
         }
-        bot.setSprinting(false);
+        setBotSprinting(false);
         nativeBot.clearMovementInput();
         return true;
+    }
+
+    /**
+     * A non-tryhard Bot does not pursue or attack a disengaged opponent, but it
+     * can still perform the same self-maintenance actions available to a player.
+     */
+    private void tickPausedOpponentActions() {
+        if (this.goldenAppleSlot >= 0) {
+            tickGoldenAppleUse();
+            return;
+        }
+        if (this.buffPotionSlot >= 0) {
+            tickBuffPotionUse();
+            return;
+        }
+        if (this.foodSlot >= 0) {
+            tickFoodUse();
+            return;
+        }
+        if (needsPriorityHealing() && tryGoldenApple()) return;
+        if (!this.openingPotionsConsumed) {
+            if (beginBuffPotionUse()) return;
+        } else if (this.ticks >= this.nextBuffPotionCheckTick && beginBuffPotionUse()) {
+            return;
+        }
+        beginFoodUse();
     }
 
     private boolean isOpponentConsuming() {
@@ -722,9 +798,6 @@ public final class BotMatchSession {
     }
 
     private void interruptForOpponentPause() {
-        if (this.goldenAppleSlot >= 0) finishGoldenAppleUse(false);
-        if (this.foodSlot >= 0) finishFoodUse(false);
-        if (this.buffPotionSlot >= 0) finishBuffPotionUse(false);
         if (this.healingPotionSlot >= 0 || this.healingRecoveryTick > 0) cancelHealingAction();
         if (this.bowSlot >= 0) finishBowCharge(false);
         if (this.buildingSlot >= 0) clearBlockPlacement();
@@ -735,24 +808,78 @@ public final class BotMatchSession {
         this.holdingRod = false;
         this.rodWeaponReturnTick = 0;
         this.attackProgress = 0.0D;
-        stopUsingHeldItem();
-        selectCombatItem();
+        if (!hasPausedOpponentConsumableAction() && !this.blockHitActive) {
+            stopUsingHeldItem();
+            selectCombatItem();
+        }
+    }
+
+    private boolean hasPausedOpponentConsumableAction() {
+        return this.goldenAppleSlot >= 0 || this.foodSlot >= 0 || this.buffPotionSlot >= 0;
     }
 
     private void updateNavigation() {
         Location target = getAimTarget();
         faceTarget(target);
         if (isWTapReleasing()) {
-            bot.setSprinting(false);
+            setBotSprinting(false);
+            if (usesLegacyBotMovement()) {
+                this.legacyForwardInput = 0.0D;
+                this.legacyStrafeInput = approach(
+                        this.legacyStrafeInput, 0.0D, this.legacyStrafeRecoveryStep);
+            }
             nativeBot.clearMovementInput();
             return;
         }
-        bot.setSprinting(true);
         if (difficulty.isStrafe() && ticks % 16 == 0) strafeDirection *= -1.0D;
         double strafe = difficulty.isStrafe()
                 && bot.getLocation().distanceSquared(player.getLocation()) < 25.0D
                 ? 0.42D * strafeDirection : 0.0D;
-        nativeBot.moveToward(player.getLocation(), getCombatMovementSpeed(), difficulty.getMinReach(), strafe);
+
+        if (usesLegacyBotMovement()) {
+            updateLegacyNavigation(player.getLocation(), strafe);
+            return;
+        }
+
+        setBotSprinting(true);
+        nativeBot.moveToward(player.getLocation(), getCombatMovementSpeed(), difficulty.getCombatDistance(), strafe);
+    }
+
+    private void updateLegacyNavigation(Location target, double desiredStrafe) {
+        initializeLegacyMovement();
+
+        if (this.ticks >= this.legacyInputRecoveryTick) {
+            this.legacyForwardInput = approach(
+                    this.legacyForwardInput, 1.0D, this.legacyInputRecoveryStep);
+            this.legacyStrafeInput = approach(
+                    this.legacyStrafeInput, desiredStrafe, this.legacyStrafeRecoveryStep);
+        } else {
+            this.legacyStrafeInput = approach(
+                    this.legacyStrafeInput, 0.0D, this.legacyStrafeRecoveryStep);
+        }
+
+        Vector offset = target.toVector().subtract(bot.getLocation().toVector()).setY(0.0D);
+        boolean movingForward = offset.lengthSquared()
+                >= difficulty.getCombatDistance() * difficulty.getCombatDistance();
+        boolean canSprint = movingForward
+                && this.ticks >= this.legacySprintResumeTick
+                && this.legacyForwardInput >= 0.8D;
+
+        if (canSprint) {
+            if (!bot.isSprinting()) rearmBotSprint();
+        } else if (movingForward) {
+            // This is only the server movement state. A forced attack stop does
+            // not become a synthetic client STOP packet.
+            bot.setSprinting(false);
+        } else if (bot.isSprinting()) {
+            // Moving backwards drops sprint on the 1.8 client.
+            setBotSprinting(false);
+            this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
+                    this.ticks + this.legacySprintRestartDelayTicks);
+        }
+
+        nativeBot.moveToward(target, this.legacyForwardInput * this.blockHitMovementScale,
+                difficulty.getCombatDistance(), this.legacyStrafeInput);
     }
 
     private void setNavigationSpeed(double speedModifier) {
@@ -761,7 +888,68 @@ public final class BotMatchSession {
 
     private void restoreCombatNavigation() {
         if (nativeBot == null || !nativeBot.isSpawned()) return;
-        bot.setSprinting(!this.pausedForOpponent && !isWTapReleasing());
+        if (usesLegacyBotMovement()) {
+            if (this.pausedForOpponent || isWTapReleasing()) {
+                bot.setSprinting(false);
+            } else {
+                beginLegacyMovementRecovery(false, false);
+            }
+            return;
+        }
+        setBotSprinting(!this.pausedForOpponent && !isWTapReleasing());
+    }
+
+    private void initializeLegacyMovement() {
+        if (this.legacyMovementInitialized) return;
+        this.legacyMovementInitialized = true;
+        this.legacyForwardInput = this.legacyKnockbackInputScale;
+        this.legacyStrafeInput = 0.0D;
+        this.legacyInputRecoveryTick = this.ticks + this.legacyKnockbackInputDelayTicks;
+        this.legacySprintResumeTick = this.ticks + this.legacySprintRestartDelayTicks;
+        setBotSprinting(false);
+    }
+
+    private void beginLegacyMovementRecovery(boolean reduceInput, boolean clientStop) {
+        if (!usesLegacyBotMovement()) return;
+        initializeLegacyMovement();
+
+        if (reduceInput) {
+            this.legacyForwardInput = Math.min(
+                    this.legacyForwardInput, this.legacyKnockbackInputScale);
+            this.legacyStrafeInput = 0.0D;
+            this.legacyInputRecoveryTick = Math.max(this.legacyInputRecoveryTick,
+                    this.ticks + this.legacyKnockbackInputDelayTicks);
+        }
+        this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
+                this.ticks + this.legacySprintRestartDelayTicks);
+
+        if (clientStop) {
+            setBotSprinting(false);
+        } else {
+            bot.setSprinting(false);
+        }
+    }
+
+    private boolean usesLegacyBotMovement() {
+        return kit.isSettingEnabled(KitSettingOldSwordBlocking.class);
+    }
+
+    private double approach(double current, double target, double maximumStep) {
+        if (current < target) return Math.min(target, current + maximumStep);
+        if (current > target) return Math.max(target, current - maximumStep);
+        return target;
+    }
+
+    private void setBotSprinting(boolean sprinting) {
+        bot.setSprinting(sprinting);
+        AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .updateSyntheticLegacySprint(bot, sprinting);
+    }
+
+    private void rearmBotSprint() {
+        bot.setSprinting(true);
+        AlleyPlugin.getInstance().getService(KnockbackManager.class)
+                .forceSyntheticLegacySprintStart(bot);
     }
 
     private double getCombatMovementSpeed() {
@@ -770,7 +958,14 @@ public final class BotMatchSession {
 
     private void applyBotMovementSpeed() {
         AttributeInstance movement = bot.getAttribute(Attribute.MOVEMENT_SPEED);
-        if (movement != null) movement.setBaseValue(0.1D * difficulty.getMovementSpeed());
+        if (movement == null) return;
+
+        // Legacy combat keeps the same movement attribute as a normal player.
+        // The Bot still supplies its regular W/strafe input while knocked back;
+        // difficulty must not make that input accelerate through Legacy KB faster.
+        double movementMultiplier = kit.isSettingEnabled(KitSettingOldSwordBlocking.class)
+                ? 1.0D : difficulty.getMovementSpeed();
+        movement.setBaseValue(0.1D * movementMultiplier);
     }
 
     private void tryAttack() {
@@ -781,11 +976,12 @@ public final class BotMatchSession {
         if (attackProgress < 1.0) return;
         attackProgress -= 1.0;
 
-        if (!isWithinAttackRange()) {
+        double attackReach = rollAttackReach();
+        if (!isWithinRange(attackReach)) {
             bot.swingMainHand();
             return;
         }
-        if (!isTargetInView()) {
+        if (!isTargetInView(attackReach)) {
             bot.swingMainHand();
             return;
         }
@@ -796,6 +992,16 @@ public final class BotMatchSession {
         KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
         PlayerKnockbackData data = manager.getPlayerData(bot);
         int attempt = this.debug ? ++this.attackAttemptSequence : 0;
+        KnockbackProfile knockbackProfile = manager.getAppliedProfile(bot);
+        boolean hasKnockbackEnchant = bot.getInventory().getItemInMainHand()
+                .getEnchantmentLevel(Enchantment.KNOCKBACK) > 0;
+        boolean applyLegacySlowdown = manager.isLegacyKnockback(bot)
+                && knockbackProfile != null
+                && (manager.hasLegacySprintKnockback(bot) || hasKnockbackEnchant);
+        Vector velocityBeforeAttack = applyLegacySlowdown ? bot.getVelocity().clone() : null;
+        boolean useWTap = difficulty.isWTap()
+                && ThreadLocalRandom.current().nextDouble() < difficulty.getWTapRate();
+        this.pendingWTap = useWTap;
 
         data.setServerSideHit(true);
         try {
@@ -803,24 +1009,108 @@ public final class BotMatchSession {
         } finally {
             data.setServerSideHit(false);
         }
-        if (!difficulty.isWTap() && !ended) {
-            // NMS interrupts sprint after a successful sprint hit. Holding Ctrl
-            // re-engages it before the next movement tick when W-tap is disabled.
-            bot.setSprinting(true);
+        // Entity damage events raised by ServerPlayer#attack are synchronous.
+        // A marker left behind here belongs to a failed swing, not a later hit.
+        this.pendingWTap = false;
+        if (velocityBeforeAttack != null) {
+            Vector current = bot.getVelocity();
+            double slowdown = knockbackProfile.getLegacyAttackerHorizontalSlowdown();
+            bot.setVelocity(new Vector(
+                    velocityBeforeAttack.getX() * slowdown,
+                    current.getY(),
+                    velocityBeforeAttack.getZ() * slowdown));
+        }
+        if (shouldStartBotBlockHit(useWTap)) startBotBlockHit();
+        if (!useWTap && !ended) {
+            if (usesLegacyBotMovement() && applyLegacySlowdown) {
+                // Keep full W input so NMS accelerates naturally from the 0.6
+                // attacker slowdown, but do not restore sprint immediately.
+                beginLegacyMovementRecovery(false, false);
+            } else {
+                rearmBotSprint();
+            }
         }
         verifyAttackAttempt(attempt, data);
     }
 
     public void confirmBotAttack() {
         if (this.debug) this.acceptedAttackSequence = this.attackAttemptSequence;
-        if (!difficulty.isWTap() || ended || bot == null || nativeBot == null) return;
-        this.wTapReleaseUntilNanos = System.nanoTime() + W_TAP_RELEASE_NANOS;
-        bot.setSprinting(false);
+        boolean useWTap = this.pendingWTap;
+        this.pendingWTap = false;
+        if (!useWTap || ended || bot == null || nativeBot == null) return;
+        this.wTapReleaseUntilNanos = System.nanoTime()
+                + difficulty.getWTapReactionTimeMs() * 1_000_000L;
+        setBotSprinting(false);
+        if (usesLegacyBotMovement()) {
+            initializeLegacyMovement();
+            this.legacyForwardInput = 0.0D;
+            this.legacyStrafeInput = 0.0D;
+            this.legacySprintResumeTick = Math.max(this.legacySprintResumeTick,
+                    this.ticks + this.legacySprintRestartDelayTicks);
+        }
         nativeBot.clearMovementInput();
     }
 
     private boolean isWTapReleasing() {
         return System.nanoTime() < this.wTapReleaseUntilNanos;
+    }
+
+    private double rollAttackReach() {
+        double minimum = difficulty.getMinReach();
+        double maximum = difficulty.getMaxReach();
+        if (maximum - minimum < 1.0E-6D) return maximum;
+        return ThreadLocalRandom.current().nextDouble(minimum, maximum);
+    }
+
+    private boolean shouldStartBotBlockHit(boolean wTapThisAttack) {
+        if (!usesLegacyBotMovement() || !difficulty.isBlockHit() || this.blockHitActive) return false;
+
+        boolean closeTrade = bot.getLocation().distanceSquared(player.getLocation()) <= 6.25D;
+        return (closeTrade || wTapThisAttack)
+                && ThreadLocalRandom.current().nextDouble() < BLOCK_HIT_TRIGGER_RATE;
+    }
+
+    private void startBotBlockHit() {
+        LegacyCombatService legacyCombat = getLegacyCombatService();
+        if (legacyCombat == null || bot == null) return;
+
+        this.blockHitActive = true;
+        this.blockHitUntilTick = this.ticks + BLOCK_HIT_USE_TICKS;
+        this.blockHitMovementScale = approach(this.blockHitMovementScale,
+                BLOCK_HIT_MOVEMENT_SCALE, BLOCK_HIT_MOVEMENT_STEP);
+        legacyCombat.setBlocking(bot.getUniqueId(), true);
+        try {
+            bot.startUsingItem(EquipmentSlot.HAND);
+        } catch (IllegalStateException ignored) {
+            finishBotBlockHit();
+        }
+    }
+
+    private void tickBotBlockHit() {
+        if (this.blockHitActive && (!usesLegacyBotMovement() || this.ticks >= this.blockHitUntilTick)) {
+            finishBotBlockHit();
+        }
+
+        double targetScale = this.blockHitActive ? BLOCK_HIT_MOVEMENT_SCALE : 1.0D;
+        this.blockHitMovementScale = approach(this.blockHitMovementScale,
+                targetScale, BLOCK_HIT_MOVEMENT_STEP);
+    }
+
+    private void finishBotBlockHit() {
+        if (!this.blockHitActive) return;
+
+        this.blockHitActive = false;
+        this.blockHitUntilTick = 0;
+        LegacyCombatService legacyCombat = getLegacyCombatService();
+        if (legacyCombat != null && bot != null) {
+            legacyCombat.setBlocking(bot.getUniqueId(), false);
+        }
+        if (bot != null && bot.hasActiveItem()) bot.clearActiveItem();
+    }
+
+    private LegacyCombatService getLegacyCombatService() {
+        MatchService matchService = AlleyPlugin.getInstance().getService(MatchService.class);
+        return matchService instanceof MatchServiceImpl impl ? impl.getLegacyCombatService() : null;
     }
 
     private void verifyAttackAttempt(int attempt, PlayerKnockbackData data) {
@@ -833,17 +1123,6 @@ public final class BotMatchSession {
                     + " distance=" + String.format(java.util.Locale.ROOT, "%.3f",
                     bot.getLocation().distance(player.getLocation())));
         });
-    }
-
-    private boolean isWithinAttackRange() {
-        return isWithinRange(getAttackReach());
-    }
-
-    private double getAttackReach() {
-        // Difficulty attack range is the long-standing Bot behaviour. The
-        // profile's interaction-range attribute still applies to packet-driven
-        // players, but must not silently shrink Hard's configured 3.2 range.
-        return difficulty.getAttackRange();
     }
 
     private Location getAimTarget() {
@@ -910,12 +1189,11 @@ public final class BotMatchSession {
      * eye-direction entity ray that a real client would use before applying a
      * melee hit, so targets behind or outside the bot's view cannot be hit.
      */
-    private boolean isTargetInView() {
+    private boolean isTargetInView(double reach) {
         Location eye = bot.getEyeLocation();
         Vector direction = eye.getDirection();
         if (direction.lengthSquared() < 1.0E-8D) return false;
 
-        double reach = getAttackReach();
         RayTraceResult hit = getCombatTargetBox().rayTrace(
                 eye.toVector(), direction.normalize(), reach);
         if (hit == null) return false;
@@ -1036,7 +1314,7 @@ public final class BotMatchSession {
         Location eye = bot.getEyeLocation();
         if (this.turnHealing) {
             nativeBot.face(eye.clone().add(this.healingEscapeDirection.clone().multiply(5.0D)), 180.0F);
-            bot.setSprinting(true);
+            setBotSprinting(true);
             nativeBot.moveToward(bot.getLocation().clone().add(this.healingEscapeDirection),
                     getCombatMovementSpeed(), 0.0D, 0.0D);
             return;
@@ -1272,6 +1550,7 @@ public final class BotMatchSession {
     }
 
     private void interruptForPriorityHealing() {
+        finishBotBlockHit();
         boolean restoreWeapon = this.buildingSlot >= 0 || this.holdingRod;
         if (this.foodSlot >= 0) finishFoodUse(false);
         if (this.buffPotionSlot >= 0) finishBuffPotionUse(false);
@@ -1326,7 +1605,7 @@ public final class BotMatchSession {
             int useTicks = Math.max(1, (int) (consumable.consumeSeconds() * 20.0F));
             this.foodSlot = holdItem(slot);
             this.foodFinishTick = this.ticks + useTicks;
-            bot.setSprinting(false);
+            setBotSprinting(false);
             setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
             startUsingHeldItem(useTicks);
             bot.updateInventory();
@@ -1352,7 +1631,7 @@ public final class BotMatchSession {
             return;
         }
 
-        bot.setSprinting(false);
+        setBotSprinting(false);
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.foodFinishTick) {
             keepUsingHeldItem(this.foodFinishTick - this.ticks + 1);
@@ -1403,7 +1682,7 @@ public final class BotMatchSession {
         this.goldenAppleFinishTick = this.ticks + GOLDEN_APPLE_USE_TICKS;
         this.nextBowTick = this.ticks + 20;
         this.nextRodTick = this.ticks + 20;
-        bot.setSprinting(false);
+        setBotSprinting(false);
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         startUsingHeldItem(GOLDEN_APPLE_USE_TICKS);
         bot.updateInventory();
@@ -1417,7 +1696,7 @@ public final class BotMatchSession {
             return;
         }
 
-        bot.setSprinting(false);
+        setBotSprinting(false);
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         if (this.ticks < this.goldenAppleFinishTick) {
             keepUsingHeldItem(Math.min(GOLDEN_APPLE_USE_TICKS,
@@ -1469,7 +1748,7 @@ public final class BotMatchSession {
         this.bowSlot = holdItem(bowSlot);
         this.bowReleaseTick = this.ticks + BOW_CHARGE_TICKS;
         this.chargingBow = bow == null ? null : bow.clone();
-        bot.setSprinting(false);
+        setBotSprinting(false);
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         startUsingHeldItem(BOW_USE_DURATION_TICKS);
         bot.updateInventory();
@@ -1483,7 +1762,7 @@ public final class BotMatchSession {
             return;
         }
 
-        bot.setSprinting(false);
+        setBotSprinting(false);
         setNavigationSpeed(getCombatMovementSpeed() * EATING_SPEED_MULTIPLIER);
         Location origin = bot.getEyeLocation();
         nativeBot.face(origin.clone().add(solveArrowVelocity(origin, getBowArrowSpeed())),
@@ -1752,6 +2031,7 @@ public final class BotMatchSession {
         ended = true;
         running = false;
         if (task != null) task.cancel();
+        finishBotBlockHit();
         if (bot != null) stopUsingHeldItem();
         if (nativeBot != null) nativeBot.stopMoving();
         if (!naturalDeath || !playerWon) freezeBotForResults();
@@ -1939,6 +2219,7 @@ public final class BotMatchSession {
     }
 
     private void clearCombatSystems() {
+        finishBotBlockHit();
         KnockbackManager manager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
         manager.clearKnockback(player);
         if (bot != null) manager.clearKnockback(bot);

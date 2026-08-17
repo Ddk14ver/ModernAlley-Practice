@@ -4,7 +4,6 @@ import com.destroystokyo.paper.event.player.PlayerLaunchProjectileEvent;
 import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.KnockbackProfile;
-import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
@@ -79,8 +78,7 @@ public class PotionMotionListener implements Listener {
     private void applyPotionMotion(Projectile projectile, Player player, Double currentCompensationOverride) {
         if (projectile.hasMetadata(MOTION_APPLIED_METADATA)) return;
 
-        PlayerKnockbackData data = manager.getPlayerData(player);
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
+        KnockbackProfile profile = manager.getAppliedProfile(player);
         if (profile == null || !profile.isPotionEnabled()) return;
 
         projectile.setMetadata(MOTION_APPLIED_METADATA,
@@ -99,8 +97,7 @@ public class PotionMotionListener implements Listener {
     public void onSplash(PotionSplashEvent event) {
         if (!(event.getEntity().getShooter() instanceof Player player)) return;
 
-        PlayerKnockbackData data = manager.getPlayerData(player);
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
+        KnockbackProfile profile = manager.getAppliedProfile(player);
         if (profile == null || !profile.isPotionEnabled()) return;
 
         double intensity = event.getIntensity(player);

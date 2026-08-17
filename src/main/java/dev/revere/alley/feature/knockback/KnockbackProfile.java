@@ -8,13 +8,24 @@ import org.bukkit.configuration.file.FileConfiguration;
  * @project Alley
  * @since 05/07/2026
  *
- * KB profile model loaded from knockback/*.yml
+ * Branch-aware KB profile model loaded from knockback/*.yml.
  */
 @Getter
 public class KnockbackProfile {
     private final String name;
+    private KnockbackBranch branch;
     private double horizontalGround, horizontalAir, horizontalSprintExtra;
     private double verticalGround, verticalAir, verticalSprintExtra;
+    private double legacyVerticalLimit;
+    private double legacyAttackerHorizontalSlowdown;
+    private double legacyHorizontalFriction;
+    private boolean legacyDistanceReductionEnabled;
+    private double legacyDistanceReductionStart;
+    private double legacyDistanceReductionFactor;
+    private double legacyDistanceReductionMaximum;
+    private double legacyDistanceMinimumHorizontal;
+    private double legacyArrowHorizontal, legacyArrowVertical, legacyArrowVerticalLimit;
+    private double legacyArrowPunchHorizontal, legacyArrowPunchVertical;
     private int hitDelay;
     private double yLimit;
     private boolean stopSprint;
@@ -43,6 +54,8 @@ public class KnockbackProfile {
     }
 
     public void reload(FileConfiguration config) {
+        KnockbackBranch configuredBranch = KnockbackBranch.fromName(config.getString("branch"));
+        branch = configuredBranch == null ? KnockbackBranch.DEFAULT : configuredBranch;
         horizontalGround = config.getDouble("horizontal.ground", 0.35);
         horizontalAir = config.getDouble("horizontal.air", 0.35);
         horizontalSprintExtra = config.getDouble("horizontal.sprint_extra", 0.2);
@@ -51,8 +64,27 @@ public class KnockbackProfile {
         verticalSprintExtra = config.getDouble("vertical.sprint_extra", 0.1);
         hitDelay = config.getInt("hit_delay", KitSettingOldHitDelay.DEFAULT_DELAY);
         yLimit = config.getDouble("y_limit", 3.0);
-        disableDownwardKb = config.getBoolean("disable_downward_kb", false);
+        disableDownwardKb = branch == KnockbackBranch.LEGACY
+                || config.getBoolean("disable_downward_kb", false);
         stopSprint = config.getBoolean("stop_sprint", false);
+        legacyVerticalLimit = config.getDouble("vertical.limit", 0.4);
+        legacyAttackerHorizontalSlowdown = config.getDouble("attacker.horizontal_slowdown", 0.6);
+        legacyHorizontalFriction = positiveOrDefault(
+                config.getDouble("friction.horizontal", 2.0), 2.0);
+        legacyDistanceReductionEnabled = config.getBoolean("distance_reduction.enabled", true);
+        legacyDistanceReductionStart = nonNegative(
+                config.getDouble("distance_reduction.start", 3.0));
+        legacyDistanceReductionFactor = nonNegative(
+                config.getDouble("distance_reduction.factor", 0.025));
+        legacyDistanceReductionMaximum = nonNegative(
+                config.getDouble("distance_reduction.maximum", 1.2));
+        legacyDistanceMinimumHorizontal = nonNegative(
+                config.getDouble("distance_reduction.minimum_horizontal", 0.12));
+        legacyArrowHorizontal = config.getDouble("arrow.horizontal", 0.4);
+        legacyArrowVertical = config.getDouble("arrow.vertical", 0.4);
+        legacyArrowVerticalLimit = config.getDouble("arrow.vertical_limit", 0.4);
+        legacyArrowPunchHorizontal = config.getDouble("arrow.punch_horizontal", 0.6);
+        legacyArrowPunchVertical = config.getDouble("arrow.punch_vertical", 0.1);
         projectileEnabled = config.getBoolean("projectile.enabled", true);
         projectileHorizontal = config.getDouble("projectile.horizontal", 0.15);
         projectileVertical = config.getDouble("projectile.vertical", 0.15);
@@ -78,5 +110,13 @@ public class KnockbackProfile {
         packetDelayTicks = config.getInt("packet.delay.ticks", 2);
         hitboxLength = config.getDouble("hitbox.length", 0.6);
         hitboxHeight = config.getDouble("hitbox.height", 1.8);
+    }
+
+    private static double positiveOrDefault(double value, double fallback) {
+        return Double.isFinite(value) && value > 0.0D ? value : fallback;
+    }
+
+    private static double nonNegative(double value) {
+        return Double.isFinite(value) ? Math.max(0.0D, value) : 0.0D;
     }
 }

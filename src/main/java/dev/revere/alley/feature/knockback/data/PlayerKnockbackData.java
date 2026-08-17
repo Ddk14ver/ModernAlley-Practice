@@ -1,5 +1,6 @@
 package dev.revere.alley.feature.knockback.data;
 
+import dev.revere.alley.feature.knockback.KnockbackBranch;
 import org.bukkit.util.Vector;
 
 import java.util.UUID;
@@ -16,6 +17,7 @@ public class PlayerKnockbackData {
     private double lastGroundY;
     private boolean onGround;
     private String profileName;
+    private KnockbackBranch branch = KnockbackBranch.DEFAULT;
     private int configuredHitDelayWindow = -1;
     private boolean serverSideHit;
     private boolean serverControlled;
@@ -25,8 +27,6 @@ public class PlayerKnockbackData {
     private boolean suppressLegacyPearlVelocity;
     private boolean legacyDamageWindowActive;
     private long legacyDamageWindowTick = Long.MIN_VALUE;
-    private long lastKnockbackApplicationTick = Long.MIN_VALUE;
-    private Vector lastAppliedKnockbackVelocity;
     private long legacyDamageSupplementTick = Long.MIN_VALUE;
     private UUID legacyDamageSupplementSource;
     private UUID legacyDamageSupplementAttacker;
@@ -45,6 +45,11 @@ public class PlayerKnockbackData {
 
     public String getProfileName() { return profileName; }
     public void setProfileName(String n) { this.profileName = n; }
+
+    public KnockbackBranch getBranch() { return branch; }
+    public void setBranch(KnockbackBranch branch) {
+        this.branch = branch == null ? KnockbackBranch.DEFAULT : branch;
+    }
 
     public int getConfiguredHitDelayWindow() { return configuredHitDelayWindow; }
     public void setConfiguredHitDelayWindow(int hitDelayWindow) { this.configuredHitDelayWindow = hitDelayWindow; }
@@ -80,13 +85,6 @@ public class PlayerKnockbackData {
         this.legacyDamageWindowTick = tick;
     }
 
-    public long getLastKnockbackApplicationTick() { return lastKnockbackApplicationTick; }
-    public void setLastKnockbackApplicationTick(long tick) { this.lastKnockbackApplicationTick = tick; }
-    public Vector getLastAppliedKnockbackVelocity() { return lastAppliedKnockbackVelocity; }
-    public void setLastAppliedKnockbackVelocity(Vector velocity) {
-        this.lastAppliedKnockbackVelocity = velocity == null ? null : velocity.clone();
-    }
-
     public long getLegacyDamageSupplementTick() { return legacyDamageSupplementTick; }
     public UUID getLegacyDamageSupplementSource() { return legacyDamageSupplementSource; }
     public UUID getLegacyDamageSupplementAttacker() { return legacyDamageSupplementAttacker; }
@@ -108,8 +106,6 @@ public class PlayerKnockbackData {
         this.serverControlledVelocity = null;
         this.legacyDamageWindowActive = false;
         this.legacyDamageWindowTick = Long.MIN_VALUE;
-        this.lastKnockbackApplicationTick = Long.MIN_VALUE;
-        this.lastAppliedKnockbackVelocity = null;
         clearLegacyDamageSupplement();
     }
 }

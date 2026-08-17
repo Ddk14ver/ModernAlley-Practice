@@ -5,9 +5,24 @@ countdown-seconds: 3
 match-time-limit-seconds: 600
 return-to-lobby-delay-seconds: 3
 
+# Legacy-only human response layer. NMS still performs the actual acceleration and friction.
+legacy-movement:
+  # A forced sprint restart is normally observed by the server about 1-2 ticks later.
+  sprint-restart-delay-ticks: 2
+  # Receiving KB keeps movement input, but delays its recovery to full strength.
+  knockback-input-delay-ticks: 1
+  knockback-input-scale: 0.35
+  input-recovery-step: 0.5
+  # Prevents the Bot from reversing A/D input at full strength in one tick.
+  strafe-recovery-step: 0.21
+
 profiles:
+  # minreach/maxreach are the lower/upper bounds used to roll each melee attack's reach.
+  # combat-distance controls when the Bot stops advancing; it is independent from attack reach.
   # 1.0 is normal player movement speed; values above 1.0 are intentionally faster.
-  # tryhard: false pauses while the opponent is turned away, consuming, or using an inventory.
+  # tryhard: false stops combat against a disengaged opponent, but permits eating and drinking.
+  # w-tap-rate is a probability: 0.65 means 65%; reaction time is milliseconds.
+  # blockhit applies only in oldSwordBlockKB kits.
   easy:
     display-name: "&aEasy"
     icon: WOODEN_SWORD
@@ -15,12 +30,16 @@ profiles:
     maxreach: 2.0
     swing-range: 6.0
     minreach: 1.45
+    combat-distance: 1.45
     movement-speed: 1.0
     aim-speed: 12.0
     aim-error: 0.32
     ping: 0
     tryhard: false
     w-tap: false
+    w-tap-rate: 0.65
+    w-tap-reaction-time-ms: 120
+    blockhit: false
     strafe: false
     bow: false
     rod: false
@@ -35,12 +54,16 @@ profiles:
     maxreach: 2.5
     swing-range: 6.2
     minreach: 1.25
+    combat-distance: 1.25
     movement-speed: 1.0
     aim-speed: 18.0
     aim-error: 0.24
     ping: 0
     tryhard: false
     w-tap: true
+    w-tap-rate: 0.65
+    w-tap-reaction-time-ms: 120
+    blockhit: false
     strafe: true
     bow: true
     rod: true
@@ -55,12 +78,16 @@ profiles:
     maxreach: 2.8
     swing-range: 6.5
     minreach: 1.00
+    combat-distance: 1.00
     movement-speed: 1.0
     aim-speed: 32.0
     aim-error: 0.16
     ping: 0
     tryhard: true
     w-tap: true
+    w-tap-rate: 0.65
+    w-tap-reaction-time-ms: 120
+    blockhit: false
     strafe: true
     bow: true
     rod: true
@@ -75,12 +102,16 @@ profiles:
     maxreach: 4.5
     swing-range: 8.0
     minreach: 0.25
+    combat-distance: 0.25
     movement-speed: 1.35
     aim-speed: 180.0
     aim-error: 0.0
     ping: 0
     tryhard: true
     w-tap: true
+    w-tap-rate: 0.65
+    w-tap-reaction-time-ms: 120
+    blockhit: false
     strafe: true
     bow: true
     rod: true

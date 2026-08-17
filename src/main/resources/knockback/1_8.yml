@@ -1,13 +1,36 @@
 # 1.8-style knockback profile
-disable_downward_kb: true
+# Used only by kits with oldSwordBlockKB enabled.
+# Downward KB is always disabled by the LEGACY branch and has no YAML switch.
+branch: LEGACY
 horizontal:
-  ground: 0.485
-  air: 0.45
-  sprint_extra: 0.3
+  ground: 0.385
+  air: 0.38
+  sprint_extra: 0.5
 vertical:
-  ground: 0.35075
-  air: 0.35
-  sprint_extra: 0.1
+  ground: 0.3375
+  air: 0.33
+  sprint_extra: 0.02
+  # Fixed base Y limit, applied before sprint/enchant or Punch bonus.
+  limit: 0.45
+attacker:
+  # 1.8 slows the attacker's horizontal motion after sprint/enchant knockback.
+  horizontal_slowdown: 0.6
+friction:
+  # Vanilla retains half of the victim's previous X/Z motion (motion / 2.0).
+  horizontal: 2.1
+distance_reduction:
+  # Reduces only the base horizontal impulse. Sprint/enchant and Punch extras are unchanged.
+  enabled: true
+  start: 2.1
+  factor: 0.08
+  maximum: 5.0
+  minimum_horizontal: 0.25
+arrow:
+  horizontal: 0.4
+  vertical: 0.3
+  vertical_limit: 0.4
+  punch_horizontal: 0.6
+  punch_vertical: 0.1
 hit_delay: 20
 hit_delay_format: nms_window
 y_limit: 3.5
@@ -18,23 +41,22 @@ projectile:
   vertical: 0.2
   horizontal_multiplier: 0.9
   vertical_multiplier: 0.9
-  direction_override: false
 hitbox:
-  length: 0.8
-  height: 2.0
+  length: 0.6
+  height: 1.8
 potion:
   enabled: true
-  horizontal_multiplier: 0.729
-  vertical_multiplier: 0.56
-  compensation_multiplier: 1.05
-  speed_compensation: 0.0
-  horizontal_compensation: 0.0
-  horizontal_offset: 0.0
-  vertical_offset: 0.0
+  horizontal_multiplier: 0.71
+  vertical_multiplier: 0.95
+  compensation_multiplier: 1.00
+  speed_compensation: 0.24
+  horizontal_compensation: 0.4
+  horizontal_offset: 0.24
+  vertical_offset: -0.03
 packet:
   misplace:
-    enabled: false
-    distance: 0.1
+    enabled: true
+    distance: 0.3
   delay:
     enabled: false
     ticks: 2

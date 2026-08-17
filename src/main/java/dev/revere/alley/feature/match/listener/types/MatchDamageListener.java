@@ -168,6 +168,9 @@ public class MatchDamageListener implements Listener {
 
         MatchGamePlayer gamePlayer = match.getGamePlayer(player);
         if (gamePlayer != null) {
+            KnockbackManager knockbackManager = AlleyPlugin.getInstance()
+                    .getService(KnockbackManager.class);
+            if (knockbackManager.isLegacyKnockback(player)) return;
             gamePlayer.getData().onSprintToggle(event.isSprinting());
         }
     }
@@ -240,8 +243,9 @@ public class MatchDamageListener implements Listener {
 
             // A higher hit inside the legacy hurt window only
             // contributes its damage delta. It is not a new Boxing/combo hit.
-            if (AlleyPlugin.getInstance().getService(KnockbackManager.class)
-                    .wasInsideHurtResistanceWindow(damaged)) return;
+            KnockbackManager knockbackManager = AlleyPlugin.getInstance()
+                    .getService(KnockbackManager.class);
+            if (knockbackManager.wasInsideHurtResistanceWindow(damaged)) return;
 
             if (!attacker.getUniqueId().equals(damaged.getUniqueId())) {
                 // Fishing rod hits are marked with a scoreboard tag — skip hit counting
@@ -254,7 +258,13 @@ public class MatchDamageListener implements Listener {
                 if (isMelee && !isRodHit) {
                     var attackerData = attackerProfile.getMatch().getGamePlayer(attacker).getData();
                     attackerData.handleAttack();
-                    attackerData.handleWTap(attacker.isSprinting());
+                    if (knockbackManager.isLegacyKnockback(attacker)) {
+                        var result = knockbackManager.recordLegacyWTapHit(attacker);
+                        attackerData.handleLegacyWTap(result.attempt(), result.success());
+                    } else {
+                        // Default keeps the original Bukkit sprint-event statistic.
+                        attackerData.handleWTap(attacker.isSprinting());
+                    }
                 }
                 damagedProfile.getMatch().getGamePlayer(damaged).getData().resetCombo();
 

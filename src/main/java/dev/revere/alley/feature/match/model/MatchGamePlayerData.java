@@ -89,6 +89,13 @@ public class MatchGamePlayerData {
         }
     }
 
+    /** Records the packet-ordered STOP -> START -> accepted-hit Legacy cycle. */
+    public void handleLegacyWTap(boolean attempt, boolean success) {
+        if (!attempt) return;
+        this.wTapAttempts++;
+        if (success) this.wTapSuccesses++;
+    }
+
     /**
      * Method to reset the combo.
      * 重置连击的方法。

@@ -33,6 +33,7 @@ public class AssembleServiceImpl implements AssembleService {
     private final ConfigService configService;
 
     private final Map<UUID, AssembleBoard> boards = new ConcurrentHashMap<>();
+    private final Map<UUID, AssembleBoard> pendingBoardRemovals = new ConcurrentHashMap<>();
     private final ChatColor[] chatColorCache = ChatColor.values();
 
     private AssembleAdapter adapter;
@@ -90,6 +91,7 @@ public class AssembleServiceImpl implements AssembleService {
             }
         }
         this.boards.clear();
+        this.pendingBoardRemovals.clear();
         Logger.info("Assemble scoreboard has been shut down.");
     }
 
@@ -107,6 +109,39 @@ public class AssembleServiceImpl implements AssembleService {
 
     @Override
     public void removeBoard(Player player) {
+        UUID playerId = player.getUniqueId();
+        AssembleBoard expectedBoard = this.boards.get(playerId);
+        if (expectedBoard == null) return;
+
+        if (!Bukkit.isPrimaryThread()) {
+            if (!this.plugin.isEnabled()
+                    || this.pendingBoardRemovals.putIfAbsent(playerId, expectedBoard) != null) {
+                return;
+            }
+
+            try {
+                Bukkit.getScheduler().runTask(this.plugin, () -> {
+                    try {
+                        this.removeBoard(player, expectedBoard);
+                    } finally {
+                        this.pendingBoardRemovals.remove(playerId, expectedBoard);
+                    }
+                });
+            } catch (RuntimeException exception) {
+                this.pendingBoardRemovals.remove(playerId, expectedBoard);
+                if (this.plugin.isEnabled()) throw exception;
+            }
+            return;
+        }
+
+        this.pendingBoardRemovals.remove(playerId, expectedBoard);
+        this.removeBoard(player, expectedBoard);
+    }
+
+    private void removeBoard(Player player, AssembleBoard expectedBoard) {
+        UUID playerId = player.getUniqueId();
+        if (this.boards.get(playerId) != expectedBoard) return;
+
         if (isCallEvents()) {
             AssembleBoardDestroyEvent destroyEvent = new AssembleBoardDestroyEvent(player);
             Bukkit.getPluginManager().callEvent(destroyEvent);
@@ -114,7 +149,7 @@ public class AssembleServiceImpl implements AssembleService {
                 return;
             }
         }
-        this.boards.remove(player.getUniqueId());
+        if (!this.boards.remove(playerId, expectedBoard)) return;
         try {
             if (player.isOnline() && player.getScoreboard() != null) {
                 player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());

@@ -13,6 +13,7 @@ import org.bukkit.FluidCollisionMode;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -53,8 +54,7 @@ public class HitDetection implements Listener {
         Player attacker = event.getPlayer();
         if (!isMeleeWeapon(attacker.getInventory().getItemInMainHand().getType())) return;
 
-        PlayerKnockbackData data = manager.getPlayerData(attacker);
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
+        KnockbackProfile profile = manager.getAppliedProfile(attacker);
         if (profile == null) return;
         if (!hasLegacySwordCombat(attacker)
                 && profile.getHitboxLength() <= 0.6D && profile.getHitboxHeight() <= 1.8D) return;
@@ -66,7 +66,7 @@ public class HitDetection implements Listener {
         detectAndAttack(attacker, profile, currentTick);
     }
 
-    @EventHandler(priority = EventPriority.MONITOR)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMeleeAttack(EntityDamageByEntityEvent event) {
         if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
         if (!(event.getDamager() instanceof Player attacker)
@@ -124,8 +124,7 @@ public class HitDetection implements Listener {
                     && accepted.tick() >= pending.swingTick()) continue;
             if (manager.isInsideHurtResistanceWindow(target)) continue;
 
-            PlayerKnockbackData data = manager.getPlayerData(attacker);
-            KnockbackProfile profile = manager.getProfile(data.getProfileName());
+            KnockbackProfile profile = manager.getAppliedProfile(attacker);
             if (profile == null) continue;
             fireAttack(attacker, target, profile);
         }
@@ -221,13 +220,24 @@ public class HitDetection implements Listener {
 
     private void fireAttack(Player attacker, Player target, KnockbackProfile profile) {
         PlayerKnockbackData data = manager.getPlayerData(attacker);
+        boolean hasKnockbackEnchant = attacker.getInventory().getItemInMainHand()
+                .getEnchantmentLevel(Enchantment.KNOCKBACK) > 0;
+        boolean applyLegacySlowdown = manager.isLegacyKnockback(attacker)
+                && (manager.hasLegacySprintKnockback(attacker) || hasKnockbackEnchant);
+        Vector velocityBeforeAttack = applyLegacySlowdown ? attacker.getVelocity().clone() : null;
         data.setServerSideHit(true);
         try {
             attacker.attack(target);
         } finally {
             data.setServerSideHit(false);
         }
-        if (profile.isStopSprint()) attacker.setSprinting(false);
+        if (velocityBeforeAttack != null) {
+            Vector current = attacker.getVelocity();
+            double slowdown = profile.getLegacyAttackerHorizontalSlowdown();
+            manager.applyLegacyAttackerHorizontalMotion(
+                    attacker, velocityBeforeAttack, current.getY(), slowdown);
+        }
+        if (profile.isStopSprint() && applyLegacySlowdown) attacker.setSprinting(false);
     }
 
     private double getMaxDistance(KnockbackProfile profile) {

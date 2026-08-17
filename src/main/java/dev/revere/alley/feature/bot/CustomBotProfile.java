@@ -16,12 +16,16 @@ public final class CustomBotProfile {
     private double maxReach = 3.0D;
     private double swingRange = 4.2D;
     private double minReach = 1.35D;
+    private double combatDistance = 1.35D;
     private double movementSpeed = 1.0D;
     private double aimSpeed = 22.0D;
     private double aimError = 0.08D;
     private int ping;
     private boolean tryhard = true;
     private boolean wTap = true;
+    private double wTapRate = 0.65D;
+    private int wTapReactionTimeMs = 120;
+    private boolean blockHit;
     private boolean strafe = true;
     private boolean bow;
     private boolean rod;

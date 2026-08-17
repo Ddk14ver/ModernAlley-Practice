@@ -18,6 +18,7 @@ import dev.revere.alley.bootstrap.annotation.Service;
 import dev.revere.alley.feature.autoclick.AutoClickService;
 import dev.revere.alley.feature.cps.CPSListener;
 import dev.revere.alley.feature.knockback.KnockbackManager;
+import dev.revere.alley.feature.knockback.KnockbackProfile;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
@@ -583,9 +584,16 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
         // damage events and therefore remains visible to Alley combat/KB code.
         PlayerKnockbackData data = this.knockbackManager.getPlayerData(attacker);
         Vector velocityBeforeAttack = attacker.getVelocity().clone();
-        boolean shouldApplyAttackerSlowdown = attacker.isSprinting()
-                || attacker.getInventory().getItemInMainHand()
+        boolean legacyKnockback = this.knockbackManager.isLegacyKnockback(attacker);
+        boolean hasKnockbackEnchant = attacker.getInventory().getItemInMainHand()
                 .getEnchantmentLevel(Enchantment.KNOCKBACK) > 0;
+        boolean shouldApplyAttackerSlowdown = legacyKnockback
+                ? this.knockbackManager.hasLegacySprintKnockback(attacker) || hasKnockbackEnchant
+                : attacker.isSprinting() || hasKnockbackEnchant;
+        KnockbackProfile knockbackProfile = this.knockbackManager.getAppliedProfile(attacker);
+        double horizontalSlowdown = legacyKnockback
+                && knockbackProfile != null
+                ? knockbackProfile.getLegacyAttackerHorizontalSlowdown() : 0.6D;
         data.setServerSideHit(true);
         try {
             attacker.attack(victim);
@@ -599,16 +607,19 @@ public final class AutoClickServiceImpl implements AutoClickService, Listener {
             startLegacyBlocking(attacker.getUniqueId());
         }
 
-        // Player#attack applies this in NMS, but a synthetic server-side call
-        // does not always produce a clientbound velocity update. Reapply from
-        // the pre-hit velocity so it is exactly 0.6 once (never 0.36), and
-        // force Bukkit to send the update to the client.
+        // Keep the server-side 1.8 attacker slowdown exact without sending a
+        // second velocity packet that could shrink an in-flight knockback.
         if (shouldApplyAttackerSlowdown) {
             Vector current = attacker.getVelocity();
-            attacker.setVelocity(new Vector(
-                    velocityBeforeAttack.getX() * 0.6D,
-                    current.getY(),
-                    velocityBeforeAttack.getZ() * 0.6D));
+            if (legacyKnockback) {
+                this.knockbackManager.applyLegacyAttackerHorizontalMotion(
+                        attacker, velocityBeforeAttack, current.getY(), horizontalSlowdown);
+            } else {
+                attacker.setVelocity(new Vector(
+                        velocityBeforeAttack.getX() * horizontalSlowdown,
+                        current.getY(),
+                        velocityBeforeAttack.getZ() * horizontalSlowdown));
+            }
         }
     }
 

@@ -42,7 +42,8 @@ public final class CustomBotMenu extends Menu {
     public Map<Integer, Button> getButtons(Player player) {
         CustomBotProfile custom = customProfile(player);
         Map<Integer, Button> buttons = new HashMap<>();
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30};
+        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25,
+                28, 29, 30, 31, 32, 33, 34};
         Setting[] settings = Setting.values();
         for (int index = 0; index < settings.length; index++) {
             buttons.put(slots[index], new SettingButton(custom, settings[index]));
@@ -179,7 +180,10 @@ public final class CustomBotMenu extends Menu {
         BOW(Material.BOW, "Bow", 1.0D, 0.0D, 1.0D, true),
         ROD(Material.FISHING_ROD, "Fishing Rod", 1.0D, 0.0D, 1.0D, true),
         LAVA(Material.MAGMA_CREAM, "Lava", 1.0D, 0.0D, 1.0D, true),
-        ANTI_FIRE(Material.WATER_BUCKET, "Anti-Fire", 1.0D, 0.0D, 1.0D, true);
+        ANTI_FIRE(Material.WATER_BUCKET, "Anti-Fire", 1.0D, 0.0D, 1.0D, true),
+        W_TAP_RATE(Material.REDSTONE, "W-Tap Rate", 0.05D, 0.0D, 1.0D, false),
+        W_TAP_REACTION_TIME(Material.REPEATER, "W-Tap Reaction Time", 10.0D, 0.0D, 1000.0D, false),
+        BLOCK_HIT(Material.SHIELD, "BlockHit", 1.0D, 0.0D, 1.0D, true);
 
         private final Material icon;
         private final String displayName;
@@ -200,6 +204,8 @@ public final class CustomBotMenu extends Menu {
 
         private String display(CustomBotProfile custom) {
             if (this.toggle) return value(custom) > 0.0D ? "Enabled" : "Disabled";
+            if (this == W_TAP_RATE) return Math.round(value(custom) * 100.0D) + "%";
+            if (this == W_TAP_REACTION_TIME) return (int) value(custom) + " ms";
             return BigDecimal.valueOf(value(custom)).setScale(2, RoundingMode.HALF_UP)
                     .stripTrailingZeros().toPlainString();
         }
@@ -233,6 +239,9 @@ public final class CustomBotMenu extends Menu {
                 case ROD -> custom.isRod() ? 1.0D : 0.0D;
                 case LAVA -> custom.isLava() ? 1.0D : 0.0D;
                 case ANTI_FIRE -> custom.isAntiFire() ? 1.0D : 0.0D;
+                case W_TAP_RATE -> custom.getWTapRate();
+                case W_TAP_REACTION_TIME -> custom.getWTapReactionTimeMs();
+                case BLOCK_HIT -> custom.isBlockHit() ? 1.0D : 0.0D;
             };
         }
 
@@ -255,6 +264,9 @@ public final class CustomBotMenu extends Menu {
                 case ROD -> custom.setRod(value > 0.0D);
                 case LAVA -> custom.setLava(value > 0.0D);
                 case ANTI_FIRE -> custom.setAntiFire(value > 0.0D);
+                case W_TAP_RATE -> custom.setWTapRate(value);
+                case W_TAP_REACTION_TIME -> custom.setWTapReactionTimeMs((int) value);
+                case BLOCK_HIT -> custom.setBlockHit(value > 0.0D);
             }
         }
     }

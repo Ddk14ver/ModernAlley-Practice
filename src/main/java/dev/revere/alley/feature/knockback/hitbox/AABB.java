@@ -40,43 +40,62 @@ public class AABB {
      * Returns the intersection point, or null if no hit.
      */
     public Vector intersectsRay(Ray ray, float minDist, float maxDist) {
-        double tmin, tmax, tymin, tymax, tzmin, tzmax;
+        if (minDist > maxDist) return null;
 
-        if (ray.direction.getX() >= 0) {
-            tmin = (min.getX() - ray.origin.getX()) / ray.direction.getX();
-            tmax = (max.getX() - ray.origin.getX()) / ray.direction.getX();
+        double entry = minDist;
+        double exit = maxDist;
+
+        double direction = ray.direction.getX();
+        double origin = ray.origin.getX();
+        if (Math.abs(direction) < 1.0E-12D) {
+            if (origin < min.getX() || origin > max.getX()) return null;
         } else {
-            tmin = (max.getX() - ray.origin.getX()) / ray.direction.getX();
-            tmax = (min.getX() - ray.origin.getX()) / ray.direction.getX();
+            double first = (min.getX() - origin) / direction;
+            double second = (max.getX() - origin) / direction;
+            if (first > second) {
+                double swap = first;
+                first = second;
+                second = swap;
+            }
+            entry = Math.max(entry, first);
+            exit = Math.min(exit, second);
+            if (entry > exit) return null;
         }
 
-        if (ray.direction.getY() >= 0) {
-            tymin = (min.getY() - ray.origin.getY()) / ray.direction.getY();
-            tymax = (max.getY() - ray.origin.getY()) / ray.direction.getY();
+        direction = ray.direction.getY();
+        origin = ray.origin.getY();
+        if (Math.abs(direction) < 1.0E-12D) {
+            if (origin < min.getY() || origin > max.getY()) return null;
         } else {
-            tymin = (max.getY() - ray.origin.getY()) / ray.direction.getY();
-            tymax = (min.getY() - ray.origin.getY()) / ray.direction.getY();
+            double first = (min.getY() - origin) / direction;
+            double second = (max.getY() - origin) / direction;
+            if (first > second) {
+                double swap = first;
+                first = second;
+                second = swap;
+            }
+            entry = Math.max(entry, first);
+            exit = Math.min(exit, second);
+            if (entry > exit) return null;
         }
 
-        if (tmin > tymax || tymin > tmax) return null;
-        if (tymin > tmin) tmin = tymin;
-        if (tymax < tmax) tmax = tymax;
-
-        if (ray.direction.getZ() >= 0) {
-            tzmin = (min.getZ() - ray.origin.getZ()) / ray.direction.getZ();
-            tzmax = (max.getZ() - ray.origin.getZ()) / ray.direction.getZ();
+        direction = ray.direction.getZ();
+        origin = ray.origin.getZ();
+        if (Math.abs(direction) < 1.0E-12D) {
+            if (origin < min.getZ() || origin > max.getZ()) return null;
         } else {
-            tzmin = (max.getZ() - ray.origin.getZ()) / ray.direction.getZ();
-            tzmax = (min.getZ() - ray.origin.getZ()) / ray.direction.getZ();
+            double first = (min.getZ() - origin) / direction;
+            double second = (max.getZ() - origin) / direction;
+            if (first > second) {
+                double swap = first;
+                first = second;
+                second = swap;
+            }
+            entry = Math.max(entry, first);
+            exit = Math.min(exit, second);
+            if (entry > exit) return null;
         }
 
-        if (tmin > tzmax || tzmin > tmax) return null;
-        if (tzmin > tmin) tmin = tzmin;
-        if (tzmax < tmax) tmax = tzmax;
-
-        if (tmin < minDist && tmax < minDist) return null;
-        if (tmin > maxDist && tmax > maxDist) return null;
-
-        return ray.getPointAtDistance(tmin);
+        return ray.getPointAtDistance(entry);
     }
 }

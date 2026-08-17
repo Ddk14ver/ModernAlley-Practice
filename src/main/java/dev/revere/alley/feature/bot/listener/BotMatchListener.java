@@ -108,10 +108,14 @@ public class BotMatchListener implements Listener {
         if (session == null || session.isEnded() || session.getBotId() == null
                 || !victim.getUniqueId().equals(session.getBotId())) return;
 
+        KnockbackManager knockbackManager = AlleyPlugin.getInstance().getService(KnockbackManager.class);
+        if (!knockbackManager.wasInsideHurtResistanceWindow(victim)) {
+            session.handleAcceptedBotKnockback();
+        }
+
         Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
             if (session.isEnded() || !victim.isValid() || victim.isDead()) return;
-            Vector applied = AlleyPlugin.getInstance().getService(KnockbackManager.class)
-                    .deliverPendingKnockback(victim);
+            Vector applied = knockbackManager.deliverPendingKnockback(victim);
             if (applied != null) session.handleKnockbackApplied(applied, "manager-tick");
         });
     }

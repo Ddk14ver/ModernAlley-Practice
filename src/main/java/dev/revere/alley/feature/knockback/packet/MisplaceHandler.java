@@ -11,7 +11,6 @@ import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.bot.match.BotMatchSession;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.KnockbackProfile;
-import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
@@ -101,8 +100,7 @@ public class MisplaceHandler extends PacketAdapter {
         Player viewer = event.getPlayer();
         UUID viewerUuid = viewer.getUniqueId();
 
-        PlayerKnockbackData viewerData = manager.getPlayerData(viewerUuid);
-        KnockbackProfile profile = viewerData != null ? manager.getProfile(viewerData.getProfileName()) : null;
+        KnockbackProfile profile = manager.getAppliedProfile(viewer);
         if (profile == null) return;
 
         PacketContainer packet = event.getPacket();

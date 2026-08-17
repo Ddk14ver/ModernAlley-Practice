@@ -59,11 +59,17 @@ public class AssembleThread extends Thread {
                 if (rawTitle == null) rawTitle = "";
                 String title = ChatColor.translateAlternateColorCodes('&', rawTitle);
 
+                List<String> newLines = this.assembleServiceImpl.getAdapter().getLines(player);
+                if (title.isEmpty() && (newLines == null || newLines.isEmpty())) {
+                    this.assembleServiceImpl.removeBoard(player);
+                    continue;
+                }
+                if (this.assembleServiceImpl.getBoards().get(player.getUniqueId()) != board) continue;
+
                 if (!objective.getDisplayName().equals(title)) {
                     objective.setDisplayName(title);
                 }
 
-                List<String> newLines = this.assembleServiceImpl.getAdapter().getLines(player);
                 List<AssembleBoardEntry> entries = board.getEntries();
                 if (newLines == null || newLines.isEmpty()) {
                     if (entries != null) { entries.forEach(AssembleBoardEntry::remove); entries.clear(); }
@@ -105,12 +111,7 @@ public class AssembleThread extends Thread {
                     }
                 }
 
-                // If scoreboard is disabled (empty title + no lines), fully remove it
-                if (title.isEmpty() && (newLines == null || newLines.isEmpty())) {
-                    this.assembleServiceImpl.removeBoard(player);
-                    continue;
-                }
-
+                if (this.assembleServiceImpl.getBoards().get(player.getUniqueId()) != board) continue;
                 if (player.getScoreboard() != scoreboard && !assembleServiceImpl.isHook()) {
                     player.setScoreboard(scoreboard);
                 }

@@ -6,6 +6,7 @@ import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyProjectileData;
 import dev.revere.alley.feature.match.internal.MatchServiceImpl;
+import dev.revere.alley.feature.knockback.KnockbackBranch;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.KnockbackProfile;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
@@ -41,13 +42,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * @project Alley
  * @since 04/07/2026
  *
- * Replaces vanilla knockback with profile-based computation.
- * Direction-based profile knockback with an optional modern downward stage.
+ * Dispatches profile knockback to isolated DEFAULT and LEGACY calculations.
+ * Only DEFAULT can use the configurable modern downward stage.
  */
 public class KnockbackListener implements Listener {
-    private static final double LEGACY_ARROW_BASE_KNOCKBACK = 0.4D;
-    private static final double LEGACY_ARROW_MAX_VERTICAL = 0.4000000059604645D;
-
     private final KnockbackManager manager;
     private final Map<UUID, AttackCooldownSnapshot> attackCooldowns = new ConcurrentHashMap<>();
     private final Map<UUID, PendingLegacyAttackerSlowdown> pendingLegacyAttackerSlowdowns = new ConcurrentHashMap<>();
@@ -121,9 +119,9 @@ public class KnockbackListener implements Listener {
     public void applyLegacyPearlKnockback(Player attacker, Player victim, Vector impactVelocity) {
         PlayerKnockbackData data = manager.getPlayerData(victim);
 
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
-        if (profile == null) profile = manager.getDefaultProfile();
-        if (profile == null || !profile.isProjectileEnabled()) return;
+        KnockbackProfile profile = manager.getAppliedProfile(victim);
+        if (profile == null || profile.getBranch() != KnockbackBranch.LEGACY
+                || !profile.isProjectileEnabled()) return;
 
         Location victimLocation = victim.getLocation();
         Vector direction = impactVelocity == null ? new Vector() : impactVelocity.clone();
@@ -142,12 +140,16 @@ public class KnockbackListener implements Listener {
             }
         }
 
-        double horizontal = profile.getProjectileHorizontal() * profile.getProjectileHorizontalMult();
+        double sourceDistance = attacker.getLocation().distance(victimLocation);
+        double horizontal = applyLegacyDistanceReduction(profile,
+                profile.getProjectileHorizontal() * profile.getProjectileHorizontalMult(),
+                sourceDistance);
         double vertical = profile.getProjectileVertical() * profile.getProjectileVerticalMult();
         Vector impulse = new Vector(dx / distance * horizontal, vertical, dz / distance * horizontal);
         Vector knockback = isLegacyBaseKnockbackResisted(victim)
                 ? victim.getVelocity().clone()
-                : inheritLegacyMotion(victim, impulse);
+                : applyLegacyBaseMotion(
+                        victim.getVelocity(), impulse, profile, profile.getLegacyVerticalLimit());
 
         if (victimLocation.getY() - data.getLastGroundY() > profile.getYLimit()) {
             knockback.setY(0.0);
@@ -164,6 +166,17 @@ public class KnockbackListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void computeVelocity(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player victim)) return;
+        PlayerKnockbackData data = manager.getPlayerData(victim);
+        if (data.getBranch() == KnockbackBranch.LEGACY) {
+            computeLegacyVelocity(event, victim, data);
+        } else {
+            computeDefaultVelocity(event);
+        }
+    }
+
+    /** Existing 1.9+ calculation, isolated from the Legacy motion-inheritance path. */
+    private void computeDefaultVelocity(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) return;
         if (victim.isDead() || victim.getGameMode() == GameMode.SPECTATOR) return;
         if (event.getCause() == EntityDamageEvent.DamageCause.FALL
                 || event.getCause() == EntityDamageEvent.DamageCause.FIRE_TICK
@@ -178,27 +191,12 @@ public class KnockbackListener implements Listener {
 
         PlayerKnockbackData vData = manager.getPlayerData(victim);
 
-        KnockbackProfile profile = manager.getProfile(vData.getProfileName());
-        if (profile == null) profile = manager.getDefaultProfile();
+        KnockbackProfile profile = manager.getAppliedProfile(victim);
         if (profile == null) return;
         Entity source = event.getDamager();
         // Accepted legacy pearl hits are delivered explicitly after damage confirmation.
         // Pearl landing self-damage must never enter the generic direction calculation.
         if (source instanceof EnderPearl) return;
-        boolean taggedLegacyRodHit = victim.getScoreboardTags().contains("alley_legacy_rod_kb");
-        if (taggedLegacyRodHit) {
-            victim.removeScoreboardTag("alley_legacy_rod_kb");
-        }
-        boolean legacyVictim = hasLegacySwordCombat(victim);
-        boolean legacyRodHit = legacyVictim && taggedLegacyRodHit;
-        boolean legacyProjectile = legacyVictim && source instanceof Projectile projectile
-                && LegacyProjectileData.isMarked(projectile)
-                && projectile.getShooter() instanceof Player shooter
-                && hasLegacySwordCombat(shooter);
-        AbstractArrow legacyArrow = legacyProjectile && source instanceof AbstractArrow arrow ? arrow : null;
-        boolean legacyMeleeHit = legacyVictim
-                && source instanceof Player legacyAttacker
-                && hasLegacySwordCombat(legacyAttacker);
         LivingEntity attacker;
         boolean isProjectile = false;
 
@@ -206,94 +204,37 @@ public class KnockbackListener implements Listener {
             attacker = (LivingEntity) source;
         } else if (source instanceof Projectile projectile) {
             if (!profile.isProjectileEnabled()) {
-                if (legacyVictim && manager.wasInsideHurtResistanceWindow(victim)) {
-                    // Even with profile projectile KB disabled, a larger legacy
-                    // projectile hit in the hurt window is damage-only.
-                    UUID shooterId = projectile.getShooter() instanceof Entity shooter
-                            ? shooter.getUniqueId() : null;
-                    vData.markLegacyDamageSupplement(
-                            Bukkit.getCurrentTick(), source.getUniqueId(), shooterId);
-                } else {
-                    vData.setPendingNativeProjectileVelocityTick(manager.getCurrentTick());
-                }
+                vData.setPendingNativeProjectileVelocityTick(manager.getCurrentTick());
                 return;
             }
             ProjectileSource shooter = projectile.getShooter();
-            if (!(shooter instanceof LivingEntity livingShooter)) {
-                if (legacyVictim && manager.wasInsideHurtResistanceWindow(victim)) {
-                    UUID shooterId = shooter instanceof Entity entity ? entity.getUniqueId() : null;
-                    vData.markLegacyDamageSupplement(
-                            Bukkit.getCurrentTick(), source.getUniqueId(), shooterId);
-                }
-                return;
-            }
+            if (!(shooter instanceof LivingEntity livingShooter)) return;
             attacker = livingShooter;
             isProjectile = true;
         } else return;
 
-        boolean legacyBaseProjectile = legacyRodHit || legacyProjectile;
-        boolean legacyCombatHit = legacyMeleeHit || legacyBaseProjectile;
-        // Use the state captured before other listeners (notably Boxing's
-        // zero-damage handler) can manually arm the current event's window.
-        boolean legacyHurtResistant = legacyVictim
-                && manager.wasInsideHurtResistanceWindow(victim);
-        // Paper/NMS may still fire an event for a larger hit inside the hurt
-        // window, but that branch only applies the damage delta.  It must not
-        // receive a second legacy velocity, Punch bonus, or combo residual.
-        if (legacyHurtResistant) {
-            vData.markLegacyDamageSupplement(
-                    Bukkit.getCurrentTick(), source.getUniqueId(), attacker.getUniqueId());
-            return;
-        }
-
         Location vLoc = victim.getLocation();
         Location aLoc = attacker.getLocation();
-        double attackerDx = vLoc.getX() - aLoc.getX();
-        double attackerDz = vLoc.getZ() - aLoc.getZ();
-        double attackerDistance = Math.sqrt(attackerDx * attackerDx + attackerDz * attackerDz);
-        double dx = attackerDx;
-        double dz = attackerDz;
-        double dist = attackerDistance;
-        if (legacyArrow != null) {
-            Vector arrowVelocity = legacyArrow.getVelocity();
-            double horizontalSpeed = Math.hypot(arrowVelocity.getX(), arrowVelocity.getZ());
-            if (horizontalSpeed > 1.0E-4) {
-                dx = arrowVelocity.getX();
-                dz = arrowVelocity.getZ();
-                dist = horizontalSpeed;
-            }
-        }
+        double dx = vLoc.getX() - aLoc.getX();
+        double dz = vLoc.getZ() - aLoc.getZ();
+        double dist = Math.sqrt(dx * dx + dz * dz);
         if (dist < 0.001) { dx = Math.random() * 0.02 - 0.01; dz = Math.random() * 0.02 - 0.01; dist = Math.sqrt(dx * dx + dz * dz); }
 
-        boolean legacyBaseKnockbackResisted = legacyCombatHit
-                && isLegacyBaseKnockbackResisted(victim);
         Vector kb;
-        boolean legacyShouldStopSprint = false;
-        if (isProjectile && !legacyBaseProjectile && source instanceof Projectile && !profile.isProjectileDirectionOverride()) {
+        if (isProjectile && source instanceof Projectile && !profile.isProjectileDirectionOverride()) {
             kb = source.getVelocity().clone().normalize().setY(1.0);
         } else {
             kb = new Vector(dx / dist, 1.0, dz / dist);
         }
 
         boolean onGround = vData.isOnGround();
-        if (legacyArrow != null) {
-            kb = legacyBaseKnockbackResisted
-                    ? victim.getVelocity().clone()
-                    : createLegacyArrowKnockback(victim, attackerDx, attackerDz, attackerDistance);
-        } else if ((isProjectile && legacyArrow == null) || legacyRodHit) {
-            // Thrown projectiles and synthetic rod hits use the projectile profile.
+        if (isProjectile) {
             kb.setX(kb.getX() * profile.getProjectileHorizontal());
             kb.setY(kb.getY() * profile.getProjectileVertical());
             kb.setZ(kb.getZ() * profile.getProjectileHorizontal());
-            // Apply extra multiplier if configured
             kb.setX(kb.getX() * profile.getProjectileHorizontalMult());
             kb.setY(kb.getY() * profile.getProjectileVerticalMult());
             kb.setZ(kb.getZ() * profile.getProjectileHorizontalMult());
-            if (legacyBaseKnockbackResisted) {
-                kb = victim.getVelocity().clone();
-            } else if (legacyBaseProjectile) {
-                kb = inheritLegacyMotion(victim, kb);
-            }
         } else {
             double hor = onGround ? profile.getHorizontalGround() : profile.getHorizontalAir();
             double ver = onGround ? profile.getVerticalGround() : profile.getVerticalAir();
@@ -301,48 +242,22 @@ public class KnockbackListener implements Listener {
             kb.setX(kb.getX() * hor);
             kb.setY(kb.getY() * ver);
             kb.setZ(kb.getZ() * hor);
-            if (legacyBaseKnockbackResisted) {
-                kb = victim.getVelocity().clone();
-            } else if (legacyMeleeHit) {
-                kb = inheritLegacyMotion(victim, kb);
+            Player playerAttacker = attacker instanceof Player ? (Player) attacker : null;
+            float attackCooldown = playerAttacker == null
+                    ? 1.0f
+                    : getAttackCooldown(playerAttacker, victim);
+            int knockbackLevel = getKnockbackLevel(attacker);
+            boolean sprinting = playerAttacker != null && playerAttacker.isSprinting();
+            if (sprinting && profile.isCooldownAffectsKb()) {
+                if (attackCooldown <= 0.9f) sprinting = false;
             }
-            if (!legacyBaseProjectile) {
-                Player playerAttacker = attacker instanceof Player ? (Player) attacker : null;
-                float attackCooldown = playerAttacker == null
-                        ? 1.0f
-                        : getAttackCooldown(playerAttacker, victim);
-                int knockbackLevel = 0;
-                if (attacker.getEquipment() != null) {
-                    var hand = attacker.getEquipment().getItemInMainHand();
-                    if (!hand.getType().isAir()) knockbackLevel = hand.getEnchantmentLevel(Enchantment.KNOCKBACK);
-                }
-                boolean sprinting = playerAttacker != null && playerAttacker.isSprinting();
-                if (sprinting && profile.isCooldownAffectsKb()) {
-                    if (attackCooldown <= 0.9f) sprinting = false;
-                }
-                int bonusLevels = knockbackLevel + (sprinting ? 1 : 0);
-                if (bonusLevels > 0) {
-                    legacyShouldStopSprint = legacyMeleeHit;
-                    double yaw = Math.toRadians(aLoc.getYaw());
-                    double horizontalBonus = bonusLevels * profile.getHorizontalSprintExtra();
-                    kb.setX(kb.getX() - Math.sin(yaw) * horizontalBonus);
-                    kb.setZ(kb.getZ() + Math.cos(yaw) * horizontalBonus);
-                    // 1.8 applies this addVelocity after the base knockback,
-                    // including when resistance rejected that base entirely.
-                    if (legacyMeleeHit) {
-                        kb.setY(kb.getY() + profile.getVerticalSprintExtra());
-                    } else {
-                        kb.setY(Math.min(0.4, kb.getY() + profile.getVerticalSprintExtra()));
-                    }
-                    // AutoClick calls Player#attack from the server thread and
-                    // applies the vanilla 0.6 attacker slowdown itself. Do not
-                    // queue the next-tick fallback as that would multiply the
-                    // already reduced velocity a second time (0.36).
-                    if (legacyMeleeHit && playerAttacker != null
-                            && !manager.getPlayerData(playerAttacker).isServerSideHit()) {
-                        queueLegacyAttackerSlowdownFallback(playerAttacker, victim);
-                    }
-                }
+            int bonusLevels = knockbackLevel + (sprinting ? 1 : 0);
+            if (bonusLevels > 0) {
+                double yaw = Math.toRadians(aLoc.getYaw());
+                double horizontalBonus = bonusLevels * profile.getHorizontalSprintExtra();
+                kb.setX(kb.getX() - Math.sin(yaw) * horizontalBonus);
+                kb.setZ(kb.getZ() + Math.cos(yaw) * horizontalBonus);
+                kb.setY(Math.min(0.4, kb.getY() + profile.getVerticalSprintExtra()));
             }
         }
 
@@ -358,19 +273,15 @@ public class KnockbackListener implements Listener {
         }
 
         // Y limit: if victim is > yLimit blocks above last ground, cancel vertical KB
-        if ((!isProjectile || (legacyBaseProjectile && legacyArrow == null))
+        if (!isProjectile
                 && vLoc.getY() - vData.getLastGroundY() > profile.getYLimit()) {
             kb.setY(0.0);
         }
         vData.setVelocity(kb);
         vData.setLastDamageTick(System.currentTimeMillis());
 
-        if (legacyCombatHit && !legacyHurtResistant) {
-            deliverPendingLegacyKnockback(victim, vData, kb);
-        }
-
         // Record attack for misplace handler
-        if (attacker instanceof Player && !isProjectile && !legacyRodHit) {
+        if (attacker instanceof Player && !isProjectile) {
             MisplaceHandler mh = manager.getMisplaceHandler();
             if (mh != null) mh.recordAttack((Player) attacker, victim);
             // stop_sprint conflicts with cooldown_affects_kb: clearing sprint makes
@@ -381,13 +292,187 @@ public class KnockbackListener implements Listener {
             // stop_sprint与cooldown_affects_kb冲突：强制清除冲刺会让后续每次攻击的
             // isSprinting()都为false，冲刺加成（哪怕满冷却）永远不会生效。
             // 启用cooldown_affects_kb时，冲刺状态交给客户端意图决定（与1.21.11原版一致）。
-            if (legacyShouldStopSprint
-                    || (!legacyMeleeHit && profile.isStopSprint() && !profile.isCooldownAffectsKb())) {
+            if (profile.isStopSprint() && !profile.isCooldownAffectsKb()) {
                 ((Player) attacker).setSprinting(false);
             }
         }
 
         manager.applyHitDelayWindow(victim);
+    }
+
+    /** Dedicated 1.8 calculation. No Default downward or cooldown logic is used here. */
+    private void computeLegacyVelocity(EntityDamageByEntityEvent event, Player victim,
+                                       PlayerKnockbackData data) {
+        if (victim.isDead() || victim.getGameMode() == GameMode.SPECTATOR) return;
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL
+                || event.getCause() == EntityDamageEvent.DamageCause.FIRE_TICK
+                || event.getCause() == EntityDamageEvent.DamageCause.LAVA
+                || event.getCause() == EntityDamageEvent.DamageCause.ENTITY_SWEEP_ATTACK) return;
+
+        KnockbackProfile profile = manager.getAppliedProfile(victim);
+        if (profile == null || profile.getBranch() != KnockbackBranch.LEGACY) return;
+
+        Entity source = event.getDamager();
+        if (source instanceof EnderPearl) return;
+
+        boolean legacyRodHit = victim.getScoreboardTags().remove("alley_legacy_rod_kb");
+        LivingEntity attacker;
+        boolean projectile = false;
+        AbstractArrow legacyArrow = null;
+
+        if (source instanceof LivingEntity living) {
+            if (living instanceof Player player && !hasLegacySwordCombat(player)) return;
+            attacker = living;
+        } else if (source instanceof Projectile projectileSource) {
+            ProjectileSource shooter = projectileSource.getShooter();
+            if (!(shooter instanceof LivingEntity livingShooter)) return;
+            if (!LegacyProjectileData.isMarked(projectileSource)) return;
+            if (livingShooter instanceof Player player && !hasLegacySwordCombat(player)) return;
+            attacker = livingShooter;
+            projectile = true;
+            if (projectileSource instanceof AbstractArrow arrow) legacyArrow = arrow;
+        } else {
+            return;
+        }
+
+        if ((projectile || legacyRodHit) && !profile.isProjectileEnabled()) {
+            if (manager.wasInsideHurtResistanceWindow(victim)) {
+                data.markLegacyDamageSupplement(
+                        Bukkit.getCurrentTick(), source.getUniqueId(), attacker.getUniqueId());
+            } else if (projectile) {
+                data.setPendingNativeProjectileVelocityTick(manager.getCurrentTick());
+            }
+            return;
+        }
+        if (manager.wasInsideHurtResistanceWindow(victim)) {
+            data.markLegacyDamageSupplement(
+                    Bukkit.getCurrentTick(), source.getUniqueId(), attacker.getUniqueId());
+            return;
+        }
+
+        Location victimLocation = victim.getLocation();
+        Location attackerLocation = attacker.getLocation();
+        boolean onGround = victim.isOnGround();
+        data.setOnGround(onGround);
+        if (onGround) data.setLastGroundY(victimLocation.getY());
+        double sourceDistance = attackerLocation.distance(victimLocation);
+        double dx = victimLocation.getX() - attackerLocation.getX();
+        double dz = victimLocation.getZ() - attackerLocation.getZ();
+        double distance = Math.hypot(dx, dz);
+        // Previous implementation used the arrow velocity for base direction:
+        // Vector arrowVelocity = legacyArrow.getVelocity();
+        // Legacy base KB now follows the damage-source entity (the shooter),
+        // matching vanilla, WindSpigot, and FulfillSpigot. Punch remains arrow-directed.
+        if (distance < 0.001D) {
+            dx = Math.random() * 0.02D - 0.01D;
+            dz = Math.random() * 0.02D - 0.01D;
+            distance = Math.hypot(dx, dz);
+        }
+
+        Vector knockback;
+        if (isLegacyBaseKnockbackResisted(victim)) {
+            // 1.8 resistance rejects only the base portion. Sprint/enchant bonus remains eligible.
+            knockback = victim.getVelocity().clone();
+        } else if (legacyArrow != null) {
+            double horizontal = applyLegacyDistanceReduction(
+                    profile, profile.getLegacyArrowHorizontal(), sourceDistance);
+            Vector impulse = new Vector(
+                    dx / distance * horizontal,
+                    profile.getLegacyArrowVertical(),
+                    dz / distance * horizontal);
+            knockback = applyLegacyBaseMotion(
+                    victim.getVelocity(), impulse, profile, profile.getLegacyArrowVerticalLimit());
+        } else if (projectile || legacyRodHit) {
+            double horizontal = applyLegacyDistanceReduction(profile,
+                    profile.getProjectileHorizontal() * profile.getProjectileHorizontalMult(),
+                    sourceDistance);
+            Vector impulse = new Vector(
+                    dx / distance * horizontal,
+                    profile.getProjectileVertical() * profile.getProjectileVerticalMult(),
+                    dz / distance * horizontal);
+            knockback = applyLegacyBaseMotion(
+                    victim.getVelocity(), impulse, profile, profile.getLegacyVerticalLimit());
+        } else {
+            double configuredHorizontal = onGround
+                    ? profile.getHorizontalGround() : profile.getHorizontalAir();
+            double horizontal = applyLegacyDistanceReduction(
+                    profile, configuredHorizontal, sourceDistance);
+            double vertical = onGround
+                    ? profile.getVerticalGround() : profile.getVerticalAir();
+            Vector impulse = new Vector(dx / distance * horizontal, vertical, dz / distance * horizontal);
+            knockback = applyLegacyBaseMotion(
+                    victim.getVelocity(), impulse, profile, profile.getLegacyVerticalLimit());
+        }
+
+        if (!projectile && !legacyRodHit) {
+            Player playerAttacker = attacker instanceof Player player ? player : null;
+            boolean sprintKnockback = playerAttacker != null
+                    && manager.hasLegacySprintKnockback(playerAttacker);
+            // Previous Legacy check retained for rollback comparison:
+            // boolean sprintKnockback = playerAttacker != null && playerAttacker.isSprinting();
+            int bonusLevels = getKnockbackLevel(attacker)
+                    + (sprintKnockback ? 1 : 0);
+            if (bonusLevels > 0) {
+                double yaw = Math.toRadians(attackerLocation.getYaw());
+                double horizontalBonus = bonusLevels * profile.getHorizontalSprintExtra();
+                knockback.setX(knockback.getX() - Math.sin(yaw) * horizontalBonus);
+                // EntityPlayer#addVelocity uses one vertical bonus, not one per level.
+                knockback.setY(knockback.getY() + profile.getVerticalSprintExtra());
+                knockback.setZ(knockback.getZ() + Math.cos(yaw) * horizontalBonus);
+                if (playerAttacker != null
+                        && !manager.getPlayerData(playerAttacker).isServerSideHit()) {
+                    queueLegacyAttackerSlowdownAdjustment(
+                            playerAttacker, victim, profile.getLegacyAttackerHorizontalSlowdown());
+                }
+                if (profile.isStopSprint() && playerAttacker != null) {
+                    if (sprintKnockback) {
+                        manager.consumeLegacySprintKnockback(playerAttacker);
+                    }
+                    playerAttacker.setSprinting(false);
+                }
+            }
+        }
+
+        if (legacyArrow != null) {
+            applyLegacyArrowPunch(knockback, legacyArrow, profile);
+        }
+        if (legacyArrow == null
+                && victimLocation.getY() - data.getLastGroundY() > profile.getYLimit()) {
+            knockback.setY(0.0D);
+        }
+
+        data.setVelocity(knockback);
+        data.setLastDamageTick(System.currentTimeMillis());
+        boolean syntheticProjectile = projectile && legacyArrow == null;
+        if (data.isServerControlled() || syntheticProjectile || legacyRodHit) {
+            deliverPendingLegacyKnockback(victim, data, knockback);
+        } else {
+            expirePendingLegacyKnockback(data, knockback);
+        }
+        if (attacker instanceof Player playerAttacker && !projectile && !legacyRodHit) {
+            MisplaceHandler misplaceHandler = manager.getMisplaceHandler();
+            if (misplaceHandler != null) misplaceHandler.recordAttack(playerAttacker, victim);
+        }
+        manager.applyHitDelayWindow(victim);
+    }
+
+    private int getKnockbackLevel(LivingEntity attacker) {
+        if (attacker.getEquipment() == null) return 0;
+        ItemStack hand = attacker.getEquipment().getItemInMainHand();
+        return hand.getType().isAir() ? 0 : hand.getEnchantmentLevel(Enchantment.KNOCKBACK);
+    }
+
+    private void applyLegacyArrowPunch(Vector knockback, AbstractArrow arrow,
+                                       KnockbackProfile profile) {
+        int punchLevel = getArrowPunch(arrow);
+        Vector arrowVelocity = arrow.getVelocity();
+        double horizontalLength = Math.hypot(arrowVelocity.getX(), arrowVelocity.getZ());
+        if (punchLevel <= 0 || horizontalLength <= 1.0E-4D) return;
+
+        double horizontal = profile.getLegacyArrowPunchHorizontal() * punchLevel;
+        knockback.setX(knockback.getX() + arrowVelocity.getX() / horizontalLength * horizontal);
+        knockback.setY(knockback.getY() + profile.getLegacyArrowPunchVertical());
+        knockback.setZ(knockback.getZ() + arrowVelocity.getZ() / horizontalLength * horizontal);
     }
 
     /**
@@ -408,8 +493,7 @@ public class KnockbackListener implements Listener {
         int knockbackLevel = hand.getEnchantmentLevel(Enchantment.KNOCKBACK);
         if (knockbackLevel <= 0) return;
 
-        KnockbackProfile profile = manager.getProfile(manager.getPlayerData(attacker).getProfileName());
-        if (profile == null) profile = manager.getDefaultProfile();
+        KnockbackProfile profile = manager.getAppliedProfile(attacker);
         // Use the profile's full base horizontal knockback per level so the push is clearly
         // felt; the old sprint_extra (0.25/level) was too weak to overcome minecart rail friction.
         double perLevel = profile != null ? profile.getHorizontalGround() : 0.5;
@@ -467,8 +551,7 @@ public class KnockbackListener implements Listener {
         if (!(event.getEntity() instanceof Player victim)) return;
 
         PlayerKnockbackData data = manager.getPlayerData(victim);
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
-        if (profile == null) profile = manager.getDefaultProfile();
+        KnockbackProfile profile = manager.getAppliedProfile(victim);
         if (profile == null || !profile.isDisableDownwardKb()) return;
 
         Vector knockback = event.getFinalKnockback();
@@ -487,8 +570,16 @@ public class KnockbackListener implements Listener {
         PendingLegacyAttackerSlowdown pending = pendingLegacyAttackerSlowdowns.get(attacker.getUniqueId());
         if (pending != null
                 && pending.tick() == Bukkit.getCurrentTick()
-                && pending.victimId().equals(victim.getUniqueId())) {
-            pending.markNativeKnockbackObserved();
+                && pending.victimId().equals(victim.getUniqueId())
+                && pendingLegacyAttackerSlowdowns.remove(attacker.getUniqueId(), pending)) {
+            double nativeSlowdown = 0.6D;
+            double configuredSlowdown = pending.horizontalSlowdown();
+            if (Math.abs(configuredSlowdown - nativeSlowdown) > 1.0E-8D) {
+                Vector current = attacker.getVelocity();
+                double compensation = configuredSlowdown / nativeSlowdown;
+                manager.applyLegacyAttackerHorizontalMotion(
+                        attacker, current, current.getY(), compensation);
+            }
         }
     }
 
@@ -539,8 +630,7 @@ public class KnockbackListener implements Listener {
             }
             return null;
         }
-        KnockbackProfile profile = manager.getProfile(data.getProfileName());
-        if (profile == null) profile = manager.getDefaultProfile();
+        KnockbackProfile profile = manager.getAppliedProfile(player);
         if (profile == null) {
             data.setVelocity(null);
             data.clearPendingNativeProjectileVelocity();
@@ -558,10 +648,6 @@ public class KnockbackListener implements Listener {
 
         data.setVelocity(null);
         data.clearPendingNativeProjectileVelocity();
-        if (applied != null) {
-            data.setLastKnockbackApplicationTick(Bukkit.getCurrentTick());
-            data.setLastAppliedKnockbackVelocity(applied);
-        }
         return applied;
     }
 
@@ -599,63 +685,34 @@ public class KnockbackListener implements Listener {
         return Math.max(LegacyProjectileData.getPunchLevel(arrow), arrow.getKnockbackStrength());
     }
 
-    /** Mirrors EntityLivingBase#knockBack for the accepted base portion of a 1.8 arrow hit. */
-    private Vector createLegacyArrowKnockback(Player victim, double directionX,
-                                               double directionZ, double horizontalDistance) {
-        if (horizontalDistance < 0.001D) {
-            directionX = Math.random() * 0.02D - 0.01D;
-            directionZ = Math.random() * 0.02D - 0.01D;
-            horizontalDistance = Math.sqrt(directionX * directionX + directionZ * directionZ);
-        }
-
-        return inheritLegacyMotion(victim, new Vector(
-                directionX / horizontalDistance * LEGACY_ARROW_BASE_KNOCKBACK,
-                LEGACY_ARROW_BASE_KNOCKBACK,
-                directionZ / horizontalDistance * LEGACY_ARROW_BASE_KNOCKBACK));
-    }
-
-    /** Mirrors the motion/2 stage of EntityLivingBase#knockBack. */
-    private Vector inheritLegacyMotion(Player victim, Vector knockback) {
-        Vector current = getLegacyInheritedMotion(victim, knockback);
-        return new Vector(
-                current.getX() * 0.5D + knockback.getX(),
-                Math.min(LEGACY_ARROW_MAX_VERTICAL,
-                        current.getY() * 0.5D + knockback.getY()),
-                current.getZ() * 0.5D + knockback.getZ());
-    }
-
     /**
-     * 1.8's knockBack() halves leftover knockback motion, not WASD walk speed.
-     * Packet players report walking through position packets, and bots have real
-     * W/strafe velocity, so {@link Player#getVelocity()} is the wrong input for
-     * both. Inherit only the decayed residual of the last delivered knockback.
+     * Keeps the Legacy horizontal motion inheritance while using FulfillSpigot's
+     * fixed base vertical velocity. Sprint/enchantment and Punch vertical bonuses
+     * are applied later and may exceed this base limit.
      */
-    private Vector getLegacyInheritedMotion(Player victim, Vector knockback) {
-        PlayerKnockbackData data = manager.getPlayerData(victim);
-        Vector previousKnockback = data.getLastAppliedKnockbackVelocity();
-        long elapsed = Bukkit.getCurrentTick() - data.getLastKnockbackApplicationTick();
-        if (previousKnockback == null || elapsed < 0L || elapsed > 20L) {
-            return new Vector();
+    private Vector applyLegacyBaseMotion(Vector currentMotion, Vector impulse,
+                                         KnockbackProfile profile, double verticalLimit) {
+        double friction = profile.getLegacyHorizontalFriction();
+        return new Vector(
+                currentMotion.getX() / friction + impulse.getX(),
+                Math.min(verticalLimit, impulse.getY()),
+                currentMotion.getZ() / friction + impulse.getZ());
+    }
+
+    private double applyLegacyDistanceReduction(KnockbackProfile profile,
+                                                double horizontal,
+                                                double sourceDistance) {
+        if (!profile.isLegacyDistanceReductionEnabled()
+                || !Double.isFinite(sourceDistance)
+                || sourceDistance <= profile.getLegacyDistanceReductionStart()) {
+            return horizontal;
         }
 
-        Vector inherited = new Vector();
-        double horizontalLength = Math.hypot(knockback.getX(), knockback.getZ());
-        if (horizontalLength >= 1.0E-8D) {
-            double directionX = knockback.getX() / horizontalLength;
-            double directionZ = knockback.getZ() / horizontalLength;
-            double previousProjection = Math.max(0.0D,
-                    previousKnockback.getX() * directionX + previousKnockback.getZ() * directionZ);
-            double friction = victim.isOnGround() ? 0.546D : 0.91D;
-            double residual = previousProjection * Math.pow(friction, elapsed);
-            inherited.setX(directionX * residual);
-            inherited.setZ(directionZ * residual);
-        }
-        double residualY = previousKnockback.getY();
-        for (long tick = 0L; tick < elapsed; tick++) {
-            residualY = (residualY - 0.08D) * 0.98D;
-        }
-        inherited.setY(Math.max(0.0D, residualY));
-        return inherited;
+        double reduction = Math.min(profile.getLegacyDistanceReductionMaximum(),
+                profile.getLegacyDistanceReductionFactor()
+                        * (sourceDistance - profile.getLegacyDistanceReductionStart()));
+        double minimum = Math.min(horizontal, profile.getLegacyDistanceMinimumHorizontal());
+        return Math.max(minimum, horizontal - reduction);
     }
 
     /** 1.8 treats knockback resistance as a per-hit probability, not a multiplier. */
@@ -668,8 +725,8 @@ public class KnockbackListener implements Listener {
     }
 
     /**
-     * Synthetic and zero-damage legacy projectile hits do not always emit a
-     * velocity event. Force the computed vector next tick only if it is still pending.
+     * Server-controlled players and synthetic legacy projectile hits do not
+     * always emit a velocity event. Deliver only those explicit fallback paths.
      */
     private void deliverPendingLegacyKnockback(Player player, PlayerKnockbackData data,
                                                Vector expected) {
@@ -686,6 +743,13 @@ public class KnockbackListener implements Listener {
             if (pending != expected) return;
             Vector delivered = consumePendingKnockback(player, player.getVelocity());
             if (delivered != null) player.setVelocity(delivered);
+        });
+    }
+
+    /** A connected native hit must never be replayed one tick late. */
+    private void expirePendingLegacyKnockback(PlayerKnockbackData data, Vector expected) {
+        Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
+            if (data.getVelocity() == expected) data.setVelocity(null);
         });
     }
 
@@ -708,30 +772,20 @@ public class KnockbackListener implements Listener {
     }
 
     /**
-     * Native player attacks already apply the 0.6 horizontal attacker slowdown after
-     * their EntityKnockbackByEntityEvent. Only supply it when that native branch did not run.
+     * Pre-compensates custom slowdown during the native attack call. NMS applies
+     * its fixed 0.6 multiplier immediately after the matching knockback event.
      */
-    private void queueLegacyAttackerSlowdownFallback(Player attacker, Player victim) {
+    private void queueLegacyAttackerSlowdownAdjustment(Player attacker, Player victim,
+                                                       double horizontalSlowdown) {
+        if (Math.abs(horizontalSlowdown - 0.6D) < 1.0E-8D) return;
+
         UUID attackerId = attacker.getUniqueId();
         PendingLegacyAttackerSlowdown pending = new PendingLegacyAttackerSlowdown(
-                victim.getUniqueId(), Bukkit.getCurrentTick(), attacker.getVelocity().clone());
+                victim.getUniqueId(), Bukkit.getCurrentTick(), horizontalSlowdown);
         pendingLegacyAttackerSlowdowns.put(attackerId, pending);
 
         Bukkit.getScheduler().runTask(AlleyPlugin.getInstance(), () -> {
-            if (!pendingLegacyAttackerSlowdowns.remove(attackerId, pending)
-                    || pending.nativeKnockbackObserved()
-                    || !attacker.isOnline()
-                    || attacker.isDead()
-                    || !hasLegacySwordCombat(attacker)) {
-                return;
-            }
-
-            Vector hitVelocity = pending.hitVelocity();
-            Vector currentVelocity = attacker.getVelocity();
-            attacker.setVelocity(new Vector(
-                    hitVelocity.getX() * 0.6D,
-                    currentVelocity.getY(),
-                    hitVelocity.getZ() * 0.6D));
+            pendingLegacyAttackerSlowdowns.remove(attackerId, pending);
         });
     }
 
@@ -740,12 +794,14 @@ public class KnockbackListener implements Listener {
      * Horizontal knockback remains owned by the configured KB profile.
      */
     private void applyDownwardKnockback(Player victim, KnockbackProfile profile, Vector knockback, Vector nativeVelocity) {
-        if (profile.isDisableDownwardKb()) {
+        if (profile.getBranch() == KnockbackBranch.LEGACY) {
+            // Legacy downward KB is always disabled and intentionally has no YAML switch.
             knockback.setY(Math.max(0.0, knockback.getY()));
             return;
         }
 
-        if (hasLegacySwordCombat(victim)) {
+        if (profile.isDisableDownwardKb()) {
+            knockback.setY(Math.max(0.0, knockback.getY()));
             return;
         }
 
@@ -760,13 +816,13 @@ public class KnockbackListener implements Listener {
     private static final class PendingLegacyAttackerSlowdown {
         private final UUID victimId;
         private final int tick;
-        private final Vector hitVelocity;
-        private boolean nativeKnockbackObserved;
+        private final double horizontalSlowdown;
 
-        private PendingLegacyAttackerSlowdown(UUID victimId, int tick, Vector hitVelocity) {
+        private PendingLegacyAttackerSlowdown(UUID victimId, int tick,
+                                              double horizontalSlowdown) {
             this.victimId = victimId;
             this.tick = tick;
-            this.hitVelocity = hitVelocity;
+            this.horizontalSlowdown = horizontalSlowdown;
         }
 
         private UUID victimId() {
@@ -777,16 +833,8 @@ public class KnockbackListener implements Listener {
             return tick;
         }
 
-        private Vector hitVelocity() {
-            return hitVelocity;
-        }
-
-        private boolean nativeKnockbackObserved() {
-            return nativeKnockbackObserved;
-        }
-
-        private void markNativeKnockbackObserved() {
-            nativeKnockbackObserved = true;
+        private double horizontalSlowdown() {
+            return horizontalSlowdown;
         }
     }
 }

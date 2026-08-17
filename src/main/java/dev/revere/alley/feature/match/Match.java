@@ -46,6 +46,7 @@ import dev.revere.alley.feature.layout.LayoutService;
 import dev.revere.alley.feature.layout.data.LayoutData;
 import dev.revere.alley.feature.match.data.MatchData;
 import dev.revere.alley.feature.match.data.types.MatchDataSolo;
+import dev.revere.alley.feature.match.internal.types.GomokuPlayable;
 import dev.revere.alley.feature.match.internal.types.HideAndSeekMatch;
 import dev.revere.alley.feature.match.internal.types.RoundsMatch;
 import dev.revere.alley.feature.match.MatchService;
@@ -420,7 +421,7 @@ public abstract class Match {
      * Helper method to trigger a nametag update for all participants in the match.
      * 触发比赛中所有参与者名称标签更新的辅助方法。
      */
-    private void updateParticipantNametags() {
+    protected final void updateParticipantNametags() {
         NametagService nametagService = this.plugin.getService(NametagService.class);
 
         getParticipants().forEach(participant -> {

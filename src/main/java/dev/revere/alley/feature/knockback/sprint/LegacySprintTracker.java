@@ -1,0 +1,172 @@
+package dev.revere.alley.feature.knockback.sprint;
+
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.ProtocolLibrary;
+import com.comphenix.protocol.events.ListenerPriority;
+import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketEvent;
+import com.comphenix.protocol.wrappers.EnumWrappers;
+import dev.revere.alley.AlleyPlugin;
+import dev.revere.alley.feature.knockback.KnockbackManager;
+import org.bukkit.entity.Player;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Tracks the client sprint declaration separately from server movement state and
+ * the one-shot sprint knockback eligibility used by Legacy combat.
+ */
+public final class LegacySprintTracker {
+    private static final long WTAP_WINDOW_NANOS = TimeUnit.MILLISECONDS.toNanos(350L);
+    private static final WTapResult NO_WTAP = new WTapResult(false, false);
+
+    private final KnockbackManager manager;
+    private final Map<UUID, SprintState> states = new ConcurrentHashMap<>();
+    private PacketAdapter packetListener;
+
+    public LegacySprintTracker(KnockbackManager manager) {
+        this.manager = manager;
+    }
+
+    public void enable() {
+        if (this.packetListener != null) return;
+
+        this.packetListener = new PacketAdapter(PacketAdapter.params(
+                AlleyPlugin.getInstance(), PacketType.Play.Client.ENTITY_ACTION)
+                .listenerPriority(ListenerPriority.NORMAL)
+                .optionSync()) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                Player player = event.getPlayer();
+                if (!manager.isLegacyKnockback(player)) return;
+
+                EnumWrappers.PlayerAction action = event.getPacket()
+                        .getPlayerActions().readSafely(0);
+                if (action == EnumWrappers.PlayerAction.START_SPRINTING) {
+                    state(player).clientStart();
+                } else if (action == EnumWrappers.PlayerAction.STOP_SPRINTING) {
+                    state(player).clientStop();
+                }
+            }
+        };
+        ProtocolLibrary.getProtocolManager().addPacketListener(this.packetListener);
+    }
+
+    public void disable() {
+        if (this.packetListener != null) {
+            ProtocolLibrary.getProtocolManager().removePacketListener(this.packetListener);
+            this.packetListener = null;
+        }
+        this.states.clear();
+    }
+
+    public void reset(Player player, boolean legacyEnabled) {
+        if (!legacyEnabled) {
+            clear(player.getUniqueId());
+            return;
+        }
+        this.states.put(player.getUniqueId(), new SprintState(player.isSprinting()));
+    }
+
+    public void clear(UUID playerId) {
+        this.states.remove(playerId);
+    }
+
+    public boolean hasKnockbackEligibility(Player player) {
+        SprintState state = this.states.get(player.getUniqueId());
+        return state != null && state.hasKnockbackEligibility();
+    }
+
+    public void consumeKnockbackEligibility(Player player) {
+        SprintState state = this.states.get(player.getUniqueId());
+        if (state != null) state.consumeKnockbackEligibility();
+    }
+
+    public WTapResult recordAcceptedMeleeHit(Player player) {
+        SprintState state = this.states.get(player.getUniqueId());
+        return state == null ? NO_WTAP : state.recordAcceptedMeleeHit();
+    }
+
+    /** Updates the virtual client sprint state for the server-controlled Bot. */
+    public void updateSyntheticSprint(Player player, boolean sprinting) {
+        if (!this.manager.isLegacyKnockback(player)) return;
+        SprintState state = state(player);
+        if (sprinting) {
+            state.syntheticStart();
+        } else {
+            state.clientStop();
+        }
+    }
+
+    /** Models the Bot immediately pressing sprint again after a successful hit. */
+    public void forceSyntheticSprintStart(Player player) {
+        if (this.manager.isLegacyKnockback(player)) state(player).clientStart();
+    }
+
+    private SprintState state(Player player) {
+        return this.states.computeIfAbsent(
+                player.getUniqueId(), ignored -> new SprintState(player.isSprinting()));
+    }
+
+    public record WTapResult(boolean attempt, boolean success) {
+    }
+
+    private static final class SprintState {
+        private boolean clientSprinting;
+        private boolean knockbackEligible;
+        private boolean pendingStop;
+        private boolean restartedAfterStop;
+        private long lastStopNanos = Long.MIN_VALUE;
+
+        private SprintState(boolean initiallySprinting) {
+            this.clientSprinting = initiallySprinting;
+            this.knockbackEligible = initiallySprinting;
+        }
+
+        /** Every explicit client START rearms KB, matching WindSpigot. */
+        private synchronized void clientStart() {
+            this.clientSprinting = true;
+            this.knockbackEligible = true;
+            if (this.pendingStop) this.restartedAfterStop = true;
+        }
+
+        /** Synthetic Bot input only rearms on a real false-to-true transition. */
+        private synchronized void syntheticStart() {
+            if (this.clientSprinting) return;
+            clientStart();
+        }
+
+        private synchronized void clientStop() {
+            if (this.clientSprinting) {
+                this.pendingStop = true;
+                this.restartedAfterStop = false;
+                this.lastStopNanos = System.nanoTime();
+            }
+            this.clientSprinting = false;
+            this.knockbackEligible = false;
+        }
+
+        private synchronized boolean hasKnockbackEligibility() {
+            return this.knockbackEligible;
+        }
+
+        private synchronized void consumeKnockbackEligibility() {
+            this.knockbackEligible = false;
+        }
+
+        private synchronized WTapResult recordAcceptedMeleeHit() {
+            if (!this.pendingStop) return NO_WTAP;
+
+            long elapsed = System.nanoTime() - this.lastStopNanos;
+            boolean attempt = elapsed >= 0L && elapsed <= WTAP_WINDOW_NANOS;
+            boolean success = attempt && this.restartedAfterStop && this.knockbackEligible;
+            this.pendingStop = false;
+            this.restartedAfterStop = false;
+            this.lastStopNanos = Long.MIN_VALUE;
+            return attempt ? new WTapResult(true, success) : NO_WTAP;
+        }
+    }
+}

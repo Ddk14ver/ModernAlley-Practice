@@ -33,9 +33,9 @@ public class ToggleScoreboardCommand extends BaseCommand {
         boolean enabled = !profile.getProfileData().getSettingData().isScoreboardEnabled();
         profile.getProfileData().getSettingData().setScoreboardEnabled(enabled);
 
-        if (enabled) {
-            this.plugin.getService(AssembleService.class).createBoard(player);
-        }
+        AssembleService assembleService = this.plugin.getService(AssembleService.class);
+        if (enabled) assembleService.createBoard(player);
+        else assembleService.removeBoard(player);
 
         player.sendMessage(CC.translate(this.getString(GlobalMessagesLocaleImpl.PROFILE_TOGGLED_SCOREBOARD)
                 .replace("{status}", enabled ? "&aenabled" : "&cdisabled"))

@@ -301,12 +301,16 @@ public class MongoUtility {
                 .put("maxReach", custom.getMaxReach())
                 .put("swingRange", custom.getSwingRange())
                 .put("minReach", custom.getMinReach())
+                .put("combatDistance", custom.getCombatDistance())
                 .put("movementSpeed", custom.getMovementSpeed())
                 .put("aimSpeed", custom.getAimSpeed())
                 .put("aimError", custom.getAimError())
                 .put("ping", custom.getPing())
                 .put("tryhard", custom.isTryhard())
                 .put("wTap", custom.isWTap())
+                .put("wTapRate", custom.getWTapRate())
+                .put("wTapReactionTimeMs", custom.getWTapReactionTimeMs())
+                .put("blockHit", custom.isBlockHit())
                 .put("strafe", custom.isStrafe())
                 .put("bow", custom.isBow())
                 .put("rod", custom.isRod())
@@ -326,12 +330,16 @@ public class MongoUtility {
         custom.setMaxReach(readDouble(document, "maxReach", custom.getMaxReach()));
         custom.setSwingRange(readDouble(document, "swingRange", custom.getSwingRange()));
         custom.setMinReach(readDouble(document, "minReach", custom.getMinReach()));
+        custom.setCombatDistance(readDouble(document, "combatDistance", custom.getMinReach()));
         custom.setMovementSpeed(readDouble(document, "movementSpeed", custom.getMovementSpeed()));
         custom.setAimSpeed(readDouble(document, "aimSpeed", custom.getAimSpeed()));
         custom.setAimError(readDouble(document, "aimError", custom.getAimError()));
         custom.setPing(document.getInteger("ping", custom.getPing()));
         custom.setTryhard(document.getBoolean("tryhard", custom.isTryhard()));
         custom.setWTap(document.getBoolean("wTap", custom.isWTap()));
+        custom.setWTapRate(readDouble(document, "wTapRate", custom.getWTapRate()));
+        custom.setWTapReactionTimeMs(document.getInteger("wTapReactionTimeMs", custom.getWTapReactionTimeMs()));
+        custom.setBlockHit(document.getBoolean("blockHit", custom.isBlockHit()));
         custom.setStrafe(document.getBoolean("strafe", custom.isStrafe()));
         custom.setBow(document.getBoolean("bow", custom.isBow()));
         custom.setRod(document.getBoolean("rod", custom.isRod()));

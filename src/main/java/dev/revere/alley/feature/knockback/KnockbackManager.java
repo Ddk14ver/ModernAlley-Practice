@@ -6,11 +6,14 @@ import dev.revere.alley.bootstrap.annotation.Service;
 import dev.revere.alley.feature.kit.Kit;
 import dev.revere.alley.feature.kit.KitService;
 import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldHitDelay;
+import dev.revere.alley.feature.kit.setting.types.combat.KitSettingOldSwordBlocking;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
 import dev.revere.alley.feature.knockback.listener.KnockbackListener;
 import dev.revere.alley.feature.knockback.listener.PotionMotionListener;
+import dev.revere.alley.feature.knockback.nms.LegacyMotionBridge;
 import dev.revere.alley.feature.knockback.packet.MisplaceHandler;
 import dev.revere.alley.feature.knockback.hitbox.HitDetection;
+import dev.revere.alley.feature.knockback.sprint.LegacySprintTracker;
 import org.bukkit.Bukkit;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
@@ -26,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @project Alley
  * @since 05/07/2026
  *
- * Built-in knockback manager. Replaces the old KnockbackAdapter.
+ * Built-in knockback manager. Resolves kit-authoritative DEFAULT/LEGACY branches.
  */
 @Service(provides = KnockbackManager.class, priority = 150)
 public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Service {
@@ -35,10 +38,13 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
     private final Map<String, KnockbackProfile> profiles = new LinkedHashMap<>();
     private final Map<UUID, PlayerKnockbackData> playerData = new ConcurrentHashMap<>();
+    private final Set<String> branchMismatchWarnings = ConcurrentHashMap.newKeySet();
+    private final LegacyMotionBridge legacyMotionBridge = new LegacyMotionBridge();
     private HitDetection hitDetection;
     private MisplaceHandler misplaceHandler;
     private KnockbackListener knockbackListener;
     private PotionMotionListener potionMotionListener;
+    private LegacySprintTracker legacySprintTracker;
     private File profilesDir;
     private long currentTick;
 
@@ -50,9 +56,11 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         }
         AlleyPlugin.getInstance().saveResource("knockback/default.yml", false);
         AlleyPlugin.getInstance().saveResource("knockback/1_8.yml", false);
-        AlleyPlugin.getInstance().saveResource("knockback/1_7.yml", false);
         reloadProfiles();
         synchronizeHitDelayConfiguration();
+
+        this.legacySprintTracker = new LegacySprintTracker(this);
+        this.legacySprintTracker.enable();
 
         // Register listeners
         this.knockbackListener = new KnockbackListener(this);
@@ -85,16 +93,54 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         if (this.misplaceHandler != null) {
             this.misplaceHandler.disable();
         }
+        if (this.legacySprintTracker != null) {
+            this.legacySprintTracker.disable();
+        }
     }
 
     // --- Profiles ---
     public void reloadProfiles() {
         profiles.clear();
-        for (File f : profilesDir.listFiles((d, n) -> n.endsWith(".yml"))) {
+        branchMismatchWarnings.clear();
+        File[] files = profilesDir.listFiles((d, n) -> n.endsWith(".yml"));
+        if (files == null) files = new File[0];
+        for (File f : files) {
             String name = f.getName().replace(".yml", "");
             YamlConfiguration config = YamlConfiguration.loadConfiguration(f);
             boolean configChanged = false;
             boolean hitDelayMigrated = false;
+            KnockbackBranch inferredBranch = name.equalsIgnoreCase("1_8")
+                    ? KnockbackBranch.LEGACY : KnockbackBranch.DEFAULT;
+            KnockbackBranch configuredBranch = KnockbackBranch.fromName(config.getString("branch"));
+            if (configuredBranch == null) {
+                if (config.isSet("branch")) {
+                    AlleyPlugin.getInstance().getLogger().warning(
+                            "[Knockback] Unknown branch in " + f.getName()
+                                    + "; using " + inferredBranch + ".");
+                }
+                configuredBranch = inferredBranch;
+                config.set("branch", configuredBranch.name());
+                configChanged = true;
+            }
+            if (configuredBranch == KnockbackBranch.LEGACY && config.isSet("disable_downward_kb")) {
+                config.set("disable_downward_kb", null);
+                configChanged = true;
+            }
+            if (configuredBranch == KnockbackBranch.LEGACY) {
+                configChanged |= setIfMissing(config, "vertical.limit", 0.4D);
+                configChanged |= setIfMissing(config, "attacker.horizontal_slowdown", 0.6D);
+                configChanged |= setIfMissing(config, "friction.horizontal", 2.0D);
+                configChanged |= setIfMissing(config, "distance_reduction.enabled", true);
+                configChanged |= setIfMissing(config, "distance_reduction.start", 3.0D);
+                configChanged |= setIfMissing(config, "distance_reduction.factor", 0.025D);
+                configChanged |= setIfMissing(config, "distance_reduction.maximum", 1.2D);
+                configChanged |= setIfMissing(config, "distance_reduction.minimum_horizontal", 0.12D);
+                configChanged |= setIfMissing(config, "arrow.horizontal", 0.4D);
+                configChanged |= setIfMissing(config, "arrow.vertical", 0.4D);
+                configChanged |= setIfMissing(config, "arrow.vertical_limit", 0.4D);
+                configChanged |= setIfMissing(config, "arrow.punch_horizontal", 0.6D);
+                configChanged |= setIfMissing(config, "arrow.punch_vertical", 0.1D);
+            }
             if (!config.isSet(HIT_DELAY_FORMAT_KEY)) {
                 int legacyDelay = Math.max(0, config.getInt("hit_delay", 10));
                 int nmsWindow = (int) Math.min((long) legacyDelay * 2L, Integer.MAX_VALUE);
@@ -149,12 +195,19 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         for (Player player : Bukkit.getOnlinePlayers()) {
             PlayerKnockbackData data = playerData.get(player.getUniqueId());
             if (data != null && data.getProfileName() != null) {
+                KnockbackProfile profile = resolveProfile(
+                        data.getProfileName(), data.getBranch(), "live player " + player.getName());
+                if (profile != null) data.setProfileName(profile.getName());
                 applyHitDelayWindow(player);
-                KnockbackProfile profile = getProfile(data.getProfileName());
-                if (profile == null) profile = getDefaultProfile();
                 applyEntityInteractionRange(player, profile);
             }
         }
+    }
+
+    private boolean setIfMissing(YamlConfiguration config, String path, Object value) {
+        if (config.isSet(path)) return false;
+        config.set(path, value);
+        return true;
     }
 
     public KnockbackProfile getProfile(String name) {
@@ -172,8 +225,61 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         return profiles.get("default");
     }
 
+    public KnockbackProfile getFallbackProfile(KnockbackBranch branch) {
+        String preferredName = branch == KnockbackBranch.LEGACY ? "1_8" : "default";
+        KnockbackProfile preferred = profiles.get(preferredName);
+        if (preferred != null && preferred.getBranch() == branch) return preferred;
+        return profiles.values().stream()
+                .filter(profile -> profile.getBranch() == branch)
+                .findFirst()
+                .orElse(null);
+    }
+
+    public KnockbackProfile resolveProfile(String profileName, KnockbackBranch requiredBranch,
+                                           String ownerDescription) {
+        KnockbackBranch branch = requiredBranch == null ? KnockbackBranch.DEFAULT : requiredBranch;
+        KnockbackProfile requested = getProfile(profileName);
+        if (requested != null && requested.getBranch() == branch) return requested;
+
+        KnockbackProfile fallback = getFallbackProfile(branch);
+        String requestedName = profileName == null || profileName.isBlank() ? "default" : profileName;
+        String warningKey = ownerDescription + '|' + requestedName + '|' + branch;
+        if (branchMismatchWarnings.add(warningKey)) {
+            String reason = requested == null
+                    ? "missing profile '" + requestedName + "'"
+                    : "profile '" + requested.getName() + "' (branch " + requested.getBranch() + ")";
+            AlleyPlugin.getInstance().getLogger().warning(
+                    "[Knockback] " + ownerDescription + " requires " + branch + " but references "
+                            + reason + "; using "
+                            + (fallback == null ? "no profile" : "'" + fallback.getName() + "'") + ".");
+        }
+        return fallback;
+    }
+
+    public KnockbackBranch getRequiredBranch(Kit kit) {
+        return kit != null && kit.isSettingEnabled(KitSettingOldSwordBlocking.class)
+                ? KnockbackBranch.LEGACY : KnockbackBranch.DEFAULT;
+    }
+
+    public KnockbackProfile resolveProfile(Kit kit) {
+        return resolveProfile(kit == null ? null : kit.getKnockbackProfile(),
+                getRequiredBranch(kit), kit == null ? "unknown kit" : "kit '" + kit.getName() + "'");
+    }
+
     public Collection<KnockbackProfile> getProfiles() {
         return profiles.values();
+    }
+
+    public KnockbackProfile getAppliedProfile(Player player) {
+        PlayerKnockbackData data = getPlayerData(player);
+        if (data.getProfileName() == null) return null;
+        KnockbackProfile profile = getProfile(data.getProfileName());
+        if (profile != null && profile.getBranch() == data.getBranch()) return profile;
+        return getFallbackProfile(data.getBranch());
+    }
+
+    public boolean isLegacyKnockback(Player player) {
+        return getPlayerData(player).getBranch() == KnockbackBranch.LEGACY;
     }
 
     private void synchronizeHitDelayConfiguration() {
@@ -201,7 +307,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
 
         String profileName = kit.getKnockbackProfile();
         if (profileName == null || profileName.isBlank()) profileName = "default";
-        KnockbackProfile profile = getProfile(profileName);
+        KnockbackProfile profile = resolveProfile(kit);
         if (profile == null) {
             AlleyPlugin.getInstance().getLogger().warning(
                     "[HitDelay] Enabled kit '" + kit.getName()
@@ -253,11 +359,13 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         }
         if (hitDetection != null) hitDetection.clearPlayer(uuid);
         if (misplaceHandler != null) misplaceHandler.clearPlayer(uuid);
+        if (legacySprintTracker != null) legacySprintTracker.clear(uuid);
     }
 
     public void clearKnockback(Player player) {
         PlayerKnockbackData data = getPlayerData(player);
         data.setProfileName(null);
+        data.setBranch(KnockbackBranch.DEFAULT);
         data.setConfiguredHitDelayWindow(-1);
         applyEntityInteractionRange(player, null);
         resetHitDelayState(player);
@@ -269,6 +377,10 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         PlayerKnockbackData data = getPlayerData(player);
         data.clearLegacyState();
         data.setVelocity(null);
+        if (legacySprintTracker != null) {
+            legacySprintTracker.reset(player,
+                    data.getBranch() == KnockbackBranch.LEGACY && data.getProfileName() != null);
+        }
         player.setNoDamageTicks(0);
         if (hitDetection != null) hitDetection.clearPlayer(player.getUniqueId());
 
@@ -284,6 +396,53 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
     public MisplaceHandler getMisplaceHandler() { return misplaceHandler; }
     public PotionMotionListener getPotionMotionListener() { return potionMotionListener; }
     public long getCurrentTick() { return currentTick; }
+
+    public boolean hasLegacySprintKnockback(Player player) {
+        return isLegacyKnockback(player) && legacySprintTracker != null
+                && legacySprintTracker.hasKnockbackEligibility(player);
+    }
+
+    public void consumeLegacySprintKnockback(Player player) {
+        if (legacySprintTracker != null) {
+            legacySprintTracker.consumeKnockbackEligibility(player);
+        }
+    }
+
+    public LegacySprintTracker.WTapResult recordLegacyWTapHit(Player player) {
+        return legacySprintTracker == null
+                ? new LegacySprintTracker.WTapResult(false, false)
+                : legacySprintTracker.recordAcceptedMeleeHit(player);
+    }
+
+    public void updateSyntheticLegacySprint(Player player, boolean sprinting) {
+        if (legacySprintTracker != null) {
+            legacySprintTracker.updateSyntheticSprint(player, sprinting);
+        }
+    }
+
+    public void forceSyntheticLegacySprintStart(Player player) {
+        if (legacySprintTracker != null) {
+            legacySprintTracker.forceSyntheticSprintStart(player);
+        }
+    }
+
+    /**
+     * Mirrors the 1.8 attacker's horizontal slowdown without using Bukkit
+     * setVelocity for a real client. Bukkit marks that call for a velocity
+     * packet, which would also shrink an in-flight knockback packet.
+     */
+    public void applyLegacyAttackerHorizontalMotion(Player player, Vector horizontalSource,
+                                                     double vertical, double multiplier) {
+        Vector adjusted = new Vector(
+                horizontalSource.getX() * multiplier,
+                vertical,
+                horizontalSource.getZ() * multiplier);
+        if (getPlayerData(player).isServerControlled()) {
+            player.setVelocity(adjusted);
+            return;
+        }
+        this.legacyMotionBridge.setDeltaMovement(player, adjusted);
+    }
 
     /**
      * Consumes the same pending profile velocity used by PlayerVelocityEvent.
@@ -356,8 +515,8 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
             return data.getConfiguredHitDelayWindow();
         }
 
-        KnockbackProfile profile = getProfile(data.getProfileName());
-        if (profile == null) profile = getDefaultProfile();
+        KnockbackProfile profile = resolveProfile(
+                data.getProfileName(), data.getBranch(), "active knockback state");
         return profile == null ? KitSettingOldHitDelay.DEFAULT_DELAY : Math.max(0, profile.getHitDelay());
     }
 
@@ -375,7 +534,10 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
      * Apply a KB profile to a player (called by Match/FFA when entering a game).
      */
     public void applyKnockback(Player player, String profileName) {
-        applyKnockback(player, profileName, -1);
+        KnockbackProfile requested = getProfile(profileName);
+        KnockbackBranch branch = requested == null ? KnockbackBranch.DEFAULT : requested.getBranch();
+        KnockbackProfile profile = resolveProfile(profileName, branch, "player " + player.getName());
+        applyKnockback(player, profile, branch, -1);
     }
 
     /**
@@ -387,37 +549,40 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
                 .filter(KitSettingOldHitDelay.class::isInstance)
                 .anyMatch(setting -> setting.isEnabled());
         int hitDelayWindow = oldHitDelayEnabled ? -1 : KitSettingOldHitDelay.DEFAULT_DELAY;
-        applyKnockback(player, kit.getKnockbackProfile(), hitDelayWindow);
+        KnockbackBranch branch = getRequiredBranch(kit);
+        applyKnockback(player, resolveProfile(kit), branch, hitDelayWindow);
     }
 
     /** Returns whether the player is still using the profile selected by this kit. */
     public boolean isKnockbackApplied(Player player, Kit kit) {
-        KnockbackProfile expected = getProfile(kit.getKnockbackProfile());
-        if (expected == null) expected = getDefaultProfile();
+        KnockbackBranch expectedBranch = getRequiredBranch(kit);
+        KnockbackProfile expected = resolveProfile(kit);
 
         PlayerKnockbackData data = getPlayerData(player);
         KnockbackProfile applied = getProfile(data.getProfileName());
-        if (applied == null) applied = getDefaultProfile();
-        return data.getProfileName() != null && applied == expected;
+        return data.getProfileName() != null
+                && data.getBranch() == expectedBranch
+                && applied == expected;
     }
 
-    private void applyKnockback(Player player, String profileName, int hitDelayWindow) {
-        if (profileName == null || profileName.isEmpty()) {
-            profileName = "default";
-        }
+    private void applyKnockback(Player player, KnockbackProfile profile,
+                                KnockbackBranch branch, int hitDelayWindow) {
         if (misplaceHandler != null) {
             // Never carry delayed movement packets across kit/round transitions.
             misplaceHandler.clearPlayer(player.getUniqueId());
         }
         PlayerKnockbackData data = getPlayerData(player);
-        data.setProfileName(profileName);
+        data.setProfileName(profile == null ? null : profile.getName());
+        data.setBranch(branch);
         data.setConfiguredHitDelayWindow(hitDelayWindow);
         data.setOnGround(player.isOnGround());
         data.setLastGroundY(player.getLocation().getY());
         data.clearLegacyState();
         data.setVelocity(null);
-        KnockbackProfile profile = getProfile(profileName);
-        if (profile == null) profile = getDefaultProfile();
+        if (legacySprintTracker != null) {
+            legacySprintTracker.reset(player,
+                    branch == KnockbackBranch.LEGACY && profile != null);
+        }
         applyEntityInteractionRange(player, profile);
         // A profile transition starts a new hurt-resistance timeline. Reset the
         // live counter before changing the window, otherwise the first hit of a
