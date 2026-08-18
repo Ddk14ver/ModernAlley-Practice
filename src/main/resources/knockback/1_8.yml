@@ -6,6 +6,8 @@ horizontal:
   ground: 0.385
   air: 0.38
   sprint_extra: 0.5
+  # One-shot horizontal bonus after a valid STOP -> START -> melee-hit W-tap.
+  wtap_extra: 0.1
 vertical:
   ground: 0.3375
   air: 0.33
@@ -57,6 +59,11 @@ packet:
   misplace:
     enabled: true
     distance: 0.3
+    normal_distance: 0.0
+    hit_distance: 0.15
+    hit_window_ticks: 3
+    hit_compensation: true
+    max_hit_compensation: 0.3
   delay:
     enabled: false
     ticks: 2

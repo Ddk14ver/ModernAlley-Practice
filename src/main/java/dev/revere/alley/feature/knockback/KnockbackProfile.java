@@ -14,7 +14,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 public class KnockbackProfile {
     private final String name;
     private KnockbackBranch branch;
-    private double horizontalGround, horizontalAir, horizontalSprintExtra;
+    private double horizontalGround, horizontalAir, horizontalSprintExtra, legacyWTapExtra;
     private double verticalGround, verticalAir, verticalSprintExtra;
     private double legacyVerticalLimit;
     private double legacyAttackerHorizontalSlowdown;
@@ -44,6 +44,11 @@ public class KnockbackProfile {
     private double entityInteractionRange;
     private boolean packetMisplaceEnabled;
     private double packetMisplaceDistance;
+    private double packetMisplaceNormalDistance;
+    private double packetMisplaceHitDistance;
+    private int packetMisplaceHitWindowTicks;
+    private boolean packetMisplaceHitCompensation;
+    private double packetMisplaceMaxHitCompensation;
     private boolean packetDelayEnabled;
     private int packetDelayTicks;
     private double hitboxLength, hitboxHeight;
@@ -59,6 +64,7 @@ public class KnockbackProfile {
         horizontalGround = config.getDouble("horizontal.ground", 0.35);
         horizontalAir = config.getDouble("horizontal.air", 0.35);
         horizontalSprintExtra = config.getDouble("horizontal.sprint_extra", 0.2);
+        legacyWTapExtra = nonNegative(config.getDouble("horizontal.wtap_extra", 0.1));
         verticalGround = config.getDouble("vertical.ground", 0.36);
         verticalAir = config.getDouble("vertical.air", 0.36);
         verticalSprintExtra = config.getDouble("vertical.sprint_extra", 0.1);
@@ -106,6 +112,16 @@ public class KnockbackProfile {
         entityInteractionRange = config.getDouble("modern.entity_interaction_range", 3.0);
         packetMisplaceEnabled = config.getBoolean("packet.misplace.enabled", false);
         packetMisplaceDistance = config.getDouble("packet.misplace.distance", 0.1);
+        packetMisplaceNormalDistance = Math.max(0.0D,
+                config.getDouble("packet.misplace.normal_distance", 0.05D));
+        packetMisplaceHitDistance = Math.max(0.0D,
+                config.getDouble("packet.misplace.hit_distance", packetMisplaceDistance));
+        packetMisplaceHitWindowTicks = Math.max(0,
+                config.getInt("packet.misplace.hit_window_ticks", 4));
+        packetMisplaceHitCompensation = config.getBoolean(
+                "packet.misplace.hit_compensation", true);
+        packetMisplaceMaxHitCompensation = Math.max(0.0D,
+                config.getDouble("packet.misplace.max_hit_compensation", 0.3D));
         packetDelayEnabled = config.getBoolean("packet.delay.enabled", false);
         packetDelayTicks = config.getInt("packet.delay.ticks", 2);
         hitboxLength = config.getDouble("hitbox.length", 0.6);

@@ -259,7 +259,7 @@ public class MatchDamageListener implements Listener {
                     var attackerData = attackerProfile.getMatch().getGamePlayer(attacker).getData();
                     attackerData.handleAttack();
                     if (knockbackManager.isLegacyKnockback(attacker)) {
-                        var result = knockbackManager.recordLegacyWTapHit(attacker);
+                        var result = knockbackManager.recordLegacyMeleeHit(attacker);
                         attackerData.handleLegacyWTap(result.attempt(), result.success());
                     } else {
                         // Default keeps the original Bukkit sprint-event statistic.

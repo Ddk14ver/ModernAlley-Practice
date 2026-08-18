@@ -81,6 +81,7 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         AlleyPlugin.getInstance().getServer().getScheduler().runTaskTimer(AlleyPlugin.getInstance(), () -> {
             currentTick++;
             if (hitDetection != null) hitDetection.tick();
+            if (legacySprintTracker != null) legacySprintTracker.tick();
             if (misplaceHandler != null) misplaceHandler.tick();
         }, 1L, 1L);
     }
@@ -412,6 +413,16 @@ public class KnockbackManager implements dev.revere.alley.bootstrap.lifecycle.Se
         return legacySprintTracker == null
                 ? new LegacySprintTracker.WTapResult(false, false)
                 : legacySprintTracker.recordAcceptedMeleeHit(player);
+    }
+
+    public boolean consumeLegacyWTapExtra(Player player) {
+        return legacySprintTracker != null
+                && legacySprintTracker.consumeWTapExtraEligibility(player);
+    }
+
+    /** Records a confirmed Legacy melee hit before the MONITOR knockback phase. */
+    public LegacySprintTracker.WTapResult recordLegacyMeleeHit(Player player) {
+        return recordLegacyWTapHit(player);
     }
 
     public void updateSyntheticLegacySprint(Player player, boolean sprinting) {

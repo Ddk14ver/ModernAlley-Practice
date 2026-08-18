@@ -167,6 +167,15 @@ public class KnockbackListener implements Listener {
     public void computeVelocity(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Player victim)) return;
         PlayerKnockbackData data = manager.getPlayerData(victim);
+        if (event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK
+                && event.getDamager() instanceof Player attacker
+                && manager.isLegacyKnockback(attacker)
+                && data.getBranch() == KnockbackBranch.LEGACY) {
+            // MatchDamageListener records this earlier for match statistics. The
+            // tracker returns the cached same-tick result, while this fallback
+            // also covers Legacy fights outside that listener.
+            manager.recordLegacyMeleeHit(attacker);
+        }
         if (data.getBranch() == KnockbackBranch.LEGACY) {
             computeLegacyVelocity(event, victim, data);
         } else {
@@ -430,6 +439,16 @@ public class KnockbackListener implements Listener {
                     }
                     playerAttacker.setSprinting(false);
                 }
+            }
+
+            // A successful STOP -> START -> melee-hit W-tap grants one extra
+            // Legacy horizontal impulse. It is consumed only after this hit has
+            // reached the actual Legacy knockback calculation.
+            if (playerAttacker != null && manager.consumeLegacyWTapExtra(playerAttacker)) {
+                double yaw = Math.toRadians(attackerLocation.getYaw());
+                double wtapExtra = profile.getLegacyWTapExtra();
+                knockback.setX(knockback.getX() - Math.sin(yaw) * wtapExtra);
+                knockback.setZ(knockback.getZ() + Math.cos(yaw) * wtapExtra);
             }
         }
 

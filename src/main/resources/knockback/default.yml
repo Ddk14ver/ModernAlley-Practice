@@ -38,6 +38,11 @@ packet:
   misplace:
     enabled: true
     distance: 0.1
+    normal_distance: 0.05
+    hit_distance: 0.1
+    hit_window_ticks: 4
+    hit_compensation: true
+    max_hit_compensation: 0.3
   delay:
     enabled: false
     ticks: 2

@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class LegacySprintTracker {
     private static final long WTAP_WINDOW_NANOS = TimeUnit.MILLISECONDS.toNanos(350L);
+    private static final long WTAP_EXTRA_LIFETIME_NANOS = TimeUnit.MILLISECONDS.toNanos(500L);
     private static final WTapResult NO_WTAP = new WTapResult(false, false);
 
     private final KnockbackManager manager;
@@ -90,6 +91,18 @@ public final class LegacySprintTracker {
         return state == null ? NO_WTAP : state.recordAcceptedMeleeHit();
     }
 
+    /** Returns and consumes the one-shot bonus granted by a valid W-tap hit. */
+    public boolean consumeWTapExtraEligibility(Player player) {
+        SprintState state = this.states.get(player.getUniqueId());
+        return state != null && state.consumeWTapExtraEligibility();
+    }
+
+    /** Clears expired one-shot W-tap bonuses from retained player sprint states. */
+    public void tick() {
+        long now = System.nanoTime();
+        this.states.values().forEach(state -> state.expireWTapExtraEligibility(now));
+    }
+
     /** Updates the virtual client sprint state for the server-controlled Bot. */
     public void updateSyntheticSprint(Player player, boolean sprinting) {
         if (!this.manager.isLegacyKnockback(player)) return;
@@ -120,6 +133,9 @@ public final class LegacySprintTracker {
         private boolean pendingStop;
         private boolean restartedAfterStop;
         private long lastStopNanos = Long.MIN_VALUE;
+        private long wtapExtraExpiresAtNanos = Long.MIN_VALUE;
+        private long lastRecordedHitTick = Long.MIN_VALUE;
+        private WTapResult lastRecordedHitResult = NO_WTAP;
 
         private SprintState(boolean initiallySprinting) {
             this.clientSprinting = initiallySprinting;
@@ -158,6 +174,9 @@ public final class LegacySprintTracker {
         }
 
         private synchronized WTapResult recordAcceptedMeleeHit() {
+            long currentTick = org.bukkit.Bukkit.getCurrentTick();
+            if (this.lastRecordedHitTick == currentTick) return this.lastRecordedHitResult;
+
             if (!this.pendingStop) return NO_WTAP;
 
             long elapsed = System.nanoTime() - this.lastStopNanos;
@@ -166,7 +185,27 @@ public final class LegacySprintTracker {
             this.pendingStop = false;
             this.restartedAfterStop = false;
             this.lastStopNanos = Long.MIN_VALUE;
-            return attempt ? new WTapResult(true, success) : NO_WTAP;
+            if (success) this.wtapExtraExpiresAtNanos = System.nanoTime() + WTAP_EXTRA_LIFETIME_NANOS;
+            this.lastRecordedHitTick = currentTick;
+            this.lastRecordedHitResult = attempt ? new WTapResult(true, success) : NO_WTAP;
+            return this.lastRecordedHitResult;
+        }
+
+        private synchronized boolean consumeWTapExtraEligibility() {
+            if (!hasWTapExtraEligibility(System.nanoTime())) return false;
+            this.wtapExtraExpiresAtNanos = Long.MIN_VALUE;
+            return true;
+        }
+
+        private synchronized void expireWTapExtraEligibility(long now) {
+            hasWTapExtraEligibility(now);
+        }
+
+        private boolean hasWTapExtraEligibility(long now) {
+            if (this.wtapExtraExpiresAtNanos == Long.MIN_VALUE) return false;
+            if (now <= this.wtapExtraExpiresAtNanos) return true;
+            this.wtapExtraExpiresAtNanos = Long.MIN_VALUE;
+            return false;
         }
     }
 }

@@ -4,6 +4,7 @@ import dev.revere.alley.AlleyPlugin;
 import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.KnockbackProfile;
 import dev.revere.alley.feature.knockback.data.PlayerKnockbackData;
+import dev.revere.alley.feature.knockback.packet.MisplaceHandler;
 import dev.revere.alley.feature.match.MatchService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyCombatService;
 import dev.revere.alley.feature.match.combat.legacy.LegacyHitboxes;
@@ -56,7 +57,9 @@ public class HitDetection implements Listener {
 
         KnockbackProfile profile = manager.getAppliedProfile(attacker);
         if (profile == null) return;
-        if (!hasLegacySwordCombat(attacker)
+        boolean needsVisualCompensation = profile.isPacketMisplaceEnabled()
+                && profile.isPacketMisplaceHitCompensation();
+        if (!hasLegacySwordCombat(attacker) && !needsVisualCompensation
                 && profile.getHitboxLength() <= 0.6D && profile.getHitboxHeight() <= 1.8D) return;
 
         int currentTick = Bukkit.getCurrentTick();
@@ -172,9 +175,11 @@ public class HitDetection implements Listener {
             if (!(entity instanceof Player victim) || !isUsableTarget(victim)
                     || victim.getUniqueId().equals(attacker.getUniqueId())) continue;
 
-            Vector origin = victim.getLocation().toVector();
+            Vector visualOffset = getVisualOffset(attacker, victim, profile);
+            Vector origin = victim.getLocation().toVector().add(visualOffset);
             Vector hit = legacyMelee
                     ? AABB.fromBoundingBox(LegacyHitboxes.meleeTarget(victim))
+                            .translate(visualOffset)
                             .intersectsRay(ray, 0.0F, (float) maxDistance)
                     : expandedBox.translate(origin).intersectsRay(
                             ray, 0.0F, (float) maxDistance);
@@ -186,7 +191,7 @@ public class HitDetection implements Listener {
                 closestHit = hit;
                 closestDistance = distance;
                 vanillaHit = (legacyMelee
-                        ? AABB.fromBoundingBox(victim.getBoundingBox())
+                        ? AABB.fromBoundingBox(victim.getBoundingBox()).translate(visualOffset)
                         : vanillaBox.translate(origin))
                         .intersectsRay(ray, 0.0F, (float) maxDistance) != null;
             }
@@ -206,6 +211,21 @@ public class HitDetection implements Listener {
         }
 
         fireAttack(attacker, closest, profile);
+    }
+
+    private Vector getVisualOffset(Player attacker, Player target, KnockbackProfile profile) {
+        if (!profile.isPacketMisplaceEnabled()
+                || !profile.isPacketMisplaceHitCompensation()) return new Vector();
+        MisplaceHandler handler = manager.getMisplaceHandler();
+        if (handler == null) return new Vector();
+
+        Vector offset = handler.getVisualOffset(attacker, target);
+        double maximum = profile.getPacketMisplaceMaxHitCompensation();
+        double length = offset.length();
+        if (length > maximum && length > 1.0E-6D) {
+            offset.multiply(maximum / length);
+        }
+        return offset;
     }
 
     private boolean isBlocked(Location eye, Vector hit) {

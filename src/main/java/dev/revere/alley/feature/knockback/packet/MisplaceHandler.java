@@ -13,6 +13,7 @@ import dev.revere.alley.feature.knockback.KnockbackManager;
 import dev.revere.alley.feature.knockback.KnockbackProfile;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,6 +39,7 @@ public class MisplaceHandler extends PacketAdapter {
     private final Map<UUID, Deque<QueuedPacket>> packetQueues = new HashMap<>();
     private final Map<UUID, Long> lastAttackTick = new ConcurrentHashMap<>();
     private final Map<UUID, Player> lastAttacker = new ConcurrentHashMap<>();
+    private final Map<UUID, MisplaceState> misplaceStates = new ConcurrentHashMap<>();
 
     public MisplaceHandler(KnockbackManager manager) {
         super(AlleyPlugin.getInstance(), ListenerPriority.LOWEST, PACKETS);
@@ -54,6 +56,7 @@ public class MisplaceHandler extends PacketAdapter {
         }
         lastAttackTick.clear();
         lastAttacker.clear();
+        misplaceStates.clear();
         ProtocolLibrary.getProtocolManager().removePacketListener(this);
     }
 
@@ -72,6 +75,7 @@ public class MisplaceHandler extends PacketAdapter {
         }
         lastAttackTick.remove(uuid);
         lastAttacker.remove(uuid);
+        misplaceStates.remove(uuid);
 
         List<UUID> affectedViewers = lastAttacker.entrySet().stream()
                 .filter(entry -> entry.getValue() != null
@@ -81,6 +85,7 @@ public class MisplaceHandler extends PacketAdapter {
         affectedViewers.forEach(viewer -> {
             lastAttacker.remove(viewer);
             lastAttackTick.remove(viewer);
+            misplaceStates.remove(viewer);
         });
     }
 
@@ -91,6 +96,27 @@ public class MisplaceHandler extends PacketAdapter {
         UUID v = victim.getUniqueId();
         lastAttackTick.put(v, manager.getCurrentTick());
         lastAttacker.put(v, attacker);
+        misplaceStates.compute(v, (ignored, state) -> {
+            if (state == null || !state.target.equals(attacker.getUniqueId())) {
+                state = new MisplaceState(attacker.getUniqueId());
+            }
+            return state;
+        });
+    }
+
+    /**
+     * Returns the horizontal position offset most recently established for the
+     * target as seen by this viewer. The value is intentionally viewer-specific;
+     * another player may have a different visual position for the same entity.
+     */
+    public Vector getVisualOffset(Player viewer, Player target) {
+        if (viewer == null || target == null) return new Vector();
+        MisplaceState state = misplaceStates.get(viewer.getUniqueId());
+        if (state == null) return new Vector();
+        synchronized (state) {
+            if (!target.getUniqueId().equals(state.target)) return new Vector();
+            return new Vector(state.offsetX, 0.0D, state.offsetZ);
+        }
     }
 
     @Override
@@ -108,15 +134,40 @@ public class MisplaceHandler extends PacketAdapter {
         int entityId = integers.read(0);
         if (entityId == viewer.getEntityId()) return;
 
+        // Keep the client's virtual position continuous. Relative packets receive
+        // only the change in visual offset, never an absolute position or a dropped
+        // movement update.
+        if (profile.isPacketMisplaceEnabled()
+                && event.getPacketType() != PacketType.Play.Server.ENTITY_LOOK) {
+            Player target = lastAttacker.get(viewerUuid);
+            if (target != null && entityId == target.getEntityId()) {
+                long now = manager.getCurrentTick();
+                Long lastTick = lastAttackTick.get(viewerUuid);
+                MisplaceState state = misplaceStates.computeIfAbsent(viewerUuid,
+                        ignored -> new MisplaceState(target.getUniqueId()));
+                synchronized (state) {
+                    if (!state.target.equals(target.getUniqueId())) {
+                        state.target = target.getUniqueId();
+                        state.resetOffset();
+                    }
+                    boolean hitWindow = lastTick != null
+                            && now - lastTick <= profile.getPacketMisplaceHitWindowTicks();
+                    double desired = hitWindow
+                            ? profile.getPacketMisplaceHitDistance()
+                            : profile.getPacketMisplaceNormalDistance();
+                    if (applyMisplace(packet, event.getPacketType(), viewer, target, state, desired)) {
+                        return;
+                    }
+                }
+            }
+        }
+
         // --- Misplace ---
         if (profile.isPacketMisplaceEnabled() && event.getPacketType() == PacketType.Play.Server.ENTITY_TELEPORT) {
             Player target = lastAttacker.get(viewerUuid);
             Long lastTick = lastAttackTick.get(viewerUuid);
             long now = manager.getCurrentTick();
-            int noDamage = viewer.getMaximumNoDamageTicks();
-            if (target != null && lastTick != null
-                    && entityId == target.getEntityId()
-                    && now - lastTick <= noDamage / 2L + 3L) {
+            if (target != null && entityId == target.getEntityId()) {
 
                 Location vLoc = viewer.getLocation();
                 double vx = vLoc.getX(), vz = vLoc.getZ();
@@ -136,7 +187,11 @@ public class MisplaceHandler extends PacketAdapter {
                 double len = Math.sqrt(dx * dx + dz * dz);
                 if (len > 0) {
                     dx /= len; dz /= len;
-                    double dist = profile.getPacketMisplaceDistance();
+                    boolean hitWindow = lastTick != null
+                            && now - lastTick <= profile.getPacketMisplaceHitWindowTicks();
+                    double dist = hitWindow
+                            ? profile.getPacketMisplaceHitDistance()
+                            : profile.getPacketMisplaceNormalDistance();
                     // Push the attacker's visual position AWAY from the victim so the victim
                     // perceives an exaggerated attack range (the "misplace" feel). Only x/z
                     // are shifted; the Y stays untouched so the entity never appears sunk.
@@ -266,6 +321,86 @@ public class MisplaceHandler extends PacketAdapter {
             ProtocolLibrary.getProtocolManager().sendServerPacket(q.player, packet, false);
         } catch (Exception ignored) {}
 
+    }
+
+    private boolean applyMisplace(PacketContainer packet, PacketType packetType,
+                                  Player viewer, Player target, MisplaceState state,
+                                  double desiredDistance) {
+        Location targetLocation = target.getLocation();
+        Location viewerLocation = viewer.getLocation();
+        double dx = viewerLocation.getX() - targetLocation.getX();
+        double dz = viewerLocation.getZ() - targetLocation.getZ();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1.0E-6D) return false;
+
+        double currentDistance = Double.isFinite(state.appliedDistance)
+                ? state.appliedDistance : 0.0D;
+        double nextDistance = moveTowards(currentDistance, desiredDistance, 0.08D);
+        double offsetX = -dx / length * nextDistance;
+        double offsetZ = -dz / length * nextDistance;
+
+        if (packetType == PacketType.Play.Server.ENTITY_TELEPORT) {
+            StructureModifier<Double> doubles = packet.getDoubles();
+            if (doubles.size() >= 3) {
+                doubles.write(0, doubles.read(0) + offsetX);
+                doubles.write(2, doubles.read(2) + offsetZ);
+                state.appliedDistance = nextDistance;
+                state.offsetX = offsetX;
+                state.offsetZ = offsetZ;
+            } else {
+                // This server version uses an unsupported teleport layout. Forget
+                // the old virtual baseline so the next relative packet rebuilds it.
+                state.resetOffset();
+            }
+            return true;
+        }
+
+        if (packetType != PacketType.Play.Server.REL_ENTITY_MOVE
+                && packetType != PacketType.Play.Server.REL_ENTITY_MOVE_LOOK) {
+            return false;
+        }
+
+        StructureModifier<Short> shorts = packet.getShorts();
+        if (shorts.size() < 3) return false;
+        int packetX = shorts.read(0);
+        int packetZ = shorts.read(2);
+        int adjustedX = packetX + (int) Math.round((offsetX - state.offsetX) * 4096.0D);
+        int adjustedZ = packetZ + (int) Math.round((offsetZ - state.offsetZ) * 4096.0D);
+        if (adjustedX < Short.MIN_VALUE || adjustedX > Short.MAX_VALUE
+                || adjustedZ < Short.MIN_VALUE || adjustedZ > Short.MAX_VALUE) {
+            state.resetOffset();
+            return false;
+        }
+
+        shorts.write(0, (short) adjustedX);
+        shorts.write(2, (short) adjustedZ);
+        state.appliedDistance = nextDistance;
+        state.offsetX = offsetX;
+        state.offsetZ = offsetZ;
+        return false;
+    }
+
+    private static double moveTowards(double current, double target, double maximumChange) {
+        double difference = target - current;
+        if (Math.abs(difference) <= maximumChange) return target;
+        return current + Math.copySign(maximumChange, difference);
+    }
+
+    private static final class MisplaceState {
+        private UUID target;
+        private double appliedDistance = Double.NaN;
+        private double offsetX;
+        private double offsetZ;
+
+        private MisplaceState(UUID target) {
+            this.target = target;
+        }
+
+        private void resetOffset() {
+            this.appliedDistance = Double.NaN;
+            this.offsetX = 0.0D;
+            this.offsetZ = 0.0D;
+        }
     }
 
     private static class QueuedPacket {
